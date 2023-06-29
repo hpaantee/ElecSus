@@ -1,4 +1,5 @@
 import arc
+import copy
 import numpy as np
 import os
 import sys
@@ -6,7 +7,7 @@ from datetime import datetime
 from scipy import constants as c
 import scipy as sp
 import sympy as sy
-import symengine
+import symengine as se
 from sympy.physics.wigner import wigner_3j, wigner_6j
 import tqdm
 from scipy.interpolate import RectBivariateSpline
@@ -122,7 +123,6 @@ class atomicSystem:
         else:
             raise ValueError
 
-        import copy
         self.states = copy.deepcopy(states)
         self.max_allowed_states = 3
         self.n_states = len(states)
@@ -136,12 +136,10 @@ class atomicSystem:
             self.DoppT = p_dict['DoppTemp'] + 273.15
         self.beam_diameter = p_dict['laserWaist']
         self.p_dict = p_dict
-        self.q = 0
 
         self.initSystemProperties()
         self.generateSymbols()
         self.generateMatrices()
-
         # Add constrain that total population has to be 1
         self.system_matrix = self.master_equation.as_mutable()
         self.system_matrix[0] = -1 + self.r.trace()
@@ -208,9 +206,6 @@ class atomicSystem:
             for i in range(self.n_states-1)])
 
         self.sublevels = [self.getF(state) for state in self.states]
-        # self.f = [np.repeat(f, 2*f+1) for f in self.sublevels]
-        # self.mf = [np.concatenate([np.arange(-f, f+1) for f in sublevel]) for sublevel in self.sublevels]
-
         self.f = [self.atom.breitRabi(*state('nlj'), np.array([self.p_dict['Bfield']]))[1] for state in self.states]
         self.mf = [self.atom.breitRabi(*state('nlj'), np.array([self.p_dict['Bfield']]))[2] for state in self.states]
 
@@ -252,11 +247,6 @@ class atomicSystem:
         elif self.p_dict['Dline']=='D2':
             interatorList = list(range(self.n[0],self.n[1]))
 
-        # print(Mg.shape, Me.shape)
-        # print(self.n)
-        # print(self.slices)
-        # print(self.total_levels)
-
         if self.p_dict['Pol'] == 0:
             bottom = 0
             top = self.n[0]
@@ -265,7 +255,6 @@ class atomicSystem:
             top = 2*self.n[0]
         elif self.p_dict['Pol'] == 100:
             bottom = 2*self.n[0]
-            # top = 3*self.n[0]
             top = Me.shape[0]
 
         for i in range(self.n_states-1):
@@ -315,8 +304,6 @@ class atomicSystem:
 
         G = np.zeros((self.total_levels, self.total_levels))
         G[self.slices[0], self.slices[0]] = 1 / self.n[0] / self.transit_time
-        # G[0:self.sublevels[0][0], self.sublevels[0][0]:self.n[0]] = 1 / self.n[0] / self.transit_time
-        # G[self.sublevels[0][0]:self.n[0], 0:self.sublevels[0][0]] = 1 / self.n[0] / self.transit_time
         for i in range(self.n_states-1):
             G[self.slices[i+1], self.slices[i]] = self.Gammas[i].T
 
@@ -328,12 +315,6 @@ class atomicSystem:
                 if (i != j):
                     for k in range(self.total_levels):
                         L[i, j] -= 0.5 * (G[i, k] + G[j, k]) * self.r[i, j]
-
-        # Ldeph = sy.zeros(self.total_levels, self.total_levels)
-        # for i in range(self.total_levels):
-        #     for j in range(self.total_levels):
-        #         if (i != j):
-        #             L[i, j] -= 0.25 * G[i, j] * self.r[i, j]
 
         self.master_equation = -sy.I * (self.H*self.r - self.r*self.H) - L#  - Ldeph
 
@@ -349,56 +330,36 @@ class atomicSystem:
         # sys.exit()
 
         A, b = sy.linear_eq_to_matrix(self.system_matrix, self.r_list)
-        # print(f'Symbolic operations: {symengine.count_ops(A):.2e}')
+        # print(f'Symbolic operations: {se.count_ops(A):.2e}')
         # A = sy.simplify(A, rational=None)
-        # print(f'Symbolic operations: {symengine.count_ops(A):.2e}')
+        # print(f'Symbolic operations: {se.count_ops(A):.2e}')
 
         self.useSymbolic = False
         if self.useSymbolic:
             A, b = sy.linear_eq_to_matrix(self.system_matrix.expand(), self.r_list)
-            print(f'Symbolic operations: {symengine.count_ops(A):.2e}')
+            print(f'Symbolic operations: {se.count_ops(A):.2e}')
             # A = sy.simplify(A, rational=None)
             # import pickle
             # with open('matrix_Ab.dat', 'wb') as f:
             #     pickle.dump([A, b], f)
-            A = symengine.Matrix(A)
-            b = symengine.Matrix(b)
+            A = se.Matrix(A)
+            b = se.Matrix(b)
             print('solve...')
             sol = A.LUsolve(b)
-            print(f'Symbolic operations: {symengine.count_ops(sol):.2e}')
+            print(f'Symbolic operations: {se.count_ops(sol):.2e}')
             print('solved')
             print(sol.subs({self.wL[0]: 1550, self.Efield[0]: 1e-4}))
-            # self.solution = symengine.Lambdify([*self.wL, *self.Efield], sol, real=False, cse=True)
+            # self.solution = se.Lambdify([*self.wL, *self.Efield], sol, real=False, cse=True)
             print('lambdified')
             sys.exit()
             return 0, 0
 
-        # A = sy.lambdify([*self.wL, *self.Efield], A, 'numpy', dtype=np.complex64)
-        A = symengine.Matrix(A)
-        A = symengine.Lambdify([*self.wL, *self.Efield], A, real=False, cse=True, dtype=np.complex64)
+        A = se.Matrix(A)
+        A = se.Lambdify([*self.wL, *self.Efield], A, real=False, cse=True, dtype=np.complex64)
         # b is always just an vector with zeros and the first entry being one
-        b = np.zeros((self.total_levels**2, 1), dtype=np.float32)
+        b = np.zeros((self.total_levels**2, 1), dtype=np.complex64)
         b[0] = 1
         return A, b
-
-    def printStats(self):
-        print(f'============= {self.atom.elementName} =============')
-        for i, f in enumerate(self.f_resonance):
-            print(f'{i}->{i+1}: {f/1e12:.3f} THz / {c.c / f * 1e9:.2f} nm')
-        for i, SL in enumerate(self.sublevels):
-            print(f'F of state {i}: {SL}')
-        print(f'Transit time: {self.transit_time * 1e6:.3f} μs')
-        for i, G in enumerate(self.Gammas):
-            print(f'Γ_{i}{i+1}: 2π * {G/1e6:.3f} MHz')
-
-        # print(f'Γ_ge: 2π * {self.Gammas_ge/1e6:.3f} MHz')
-        print(f'Branching ratios e->g:')
-        for F_p in self.sublevels[1]:
-            for F in self.sublevels[0]:
-                B = self.getBranchingRatio(
-                    self.states[1].F(F_p), self.states[0].F(F))
-                print(f"F'={F_p} -> F={F}: B={float(B):.3f}")
-        print(f'==================================================')
 
     def v_dist(self, v):
         return np.sqrt(self.atom.mass / (2 * c.pi * c.k * self.DoppT)) \
