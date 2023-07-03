@@ -914,9 +914,9 @@ def get_spectra(X, E_in, p_dict, outputs=None, _static=types.SimpleNamespace(ato
 		else:
 			for i in range(len(_static.atoms)):
 				_static.atoms[i].update(p_dict)
-
-		beam_ge=bwf.beam(w=(X-shift)*1e6, P=laserPower, D=laserWaist)
-		transmissions = [atom.transmission([beam_ge], z=lcell, precision=p_dict['bwf_precision'], doppler=False) for atom in _static.atoms]
+		useDoppler = True if p_dict['DoppTemp'] > -273.14 else False
+		beam_ge=bwf.beam(w=(X-shift), P=laserPower, D=laserWaist)
+		transmissions = [atom.transmission([beam_ge], z=lcell, precision=p_dict['bwf_precision'], doppler=useDoppler) for atom in _static.atoms]
 		S0 = np.prod(np.array(transmissions), axis=0)
 
 	Iz = (E_out[2] * E_out[2].conjugate()).real / I_in

@@ -438,7 +438,7 @@ class atomicSystem:
         w_ge, P_ge, D_ge, sgn_ge = beam_ge
         w_ge = np.atleast_1d(w_ge)
         P_ge = np.atleast_1d(P_ge)
-        k_ge = self.f_resonance[0] / c.c
+        k_ge = self.f_resonance[0] / c.c / 1e6
 
         if beam_er is not None:
             w_er, P_er, D_er, sgn_er = beam_er
@@ -453,7 +453,7 @@ class atomicSystem:
         chi = np.zeros_like(exci_state, dtype='complex128')
 
         resolution = 2  # MHz
-        v = np.arange(w_ge.min()/1e6 - 1000, w_ge.max()/1e6 + 1000, resolution)
+        v = np.arange(w_ge.min() - 1000, w_ge.max() + 1000, resolution)
         v_distribution = self.v_dist(np.subtract.outer(w_ge / k_ge, v))
         for i, P in enumerate(P_ge):
             if beam_er is None:
