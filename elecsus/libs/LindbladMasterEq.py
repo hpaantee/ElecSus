@@ -227,6 +227,9 @@ class atomicSystem:
             *self.states[i]('nlj'), *self.states[i+1]('nlj'))
             * c.e * c.physical_constants['Bohr radius'][0]
             for i in range(self.n_states-1)]
+        naturalLineWidth = [self.atom.getTransitionRate(
+            *self.states[i+1]('nlj'), *self.states[i]('nlj')) / 2 / c.pi * 1e-6
+            for i in range(self.n_states-1)]
         # SFF = [self.getSFF(self.states[i].F(self.sublevels[i]),
         #                    self.states[i+1].F(self.sublevels[i+1]))
         #        for i in range(self.n_states-1)]
@@ -236,16 +239,19 @@ class atomicSystem:
         self.dme = [np.zeros((self.n[i], self.n[i+1])) for i in range(self.n_states-1)]
         self.Gammas = [np.zeros((self.n[i], self.n[i+1])) for i in range(self.n_states-1)]
         H = ES.Hamiltonian(self.element, self.p_dict['Dline'], self.atom.gL, self.p_dict['Bfield'])
-        Eg = H.groundEnergies * 1e6
-        Ee = H.excitedEnergies * 1e6
+        Eg = H.groundEnergies
+        Ee = H.excitedEnergies
         Mg = np.array(H.groundManifold)[:,1:]  # Cut off energy eigenvalues
         Me = np.array(H.excitedManifold)[:,1:]
-        # self.energySeparation = [Eg, Ee]
 
-        if self.p_dict['Dline'] =='D1':
-            interatorList = list(range(self.n[0]))
-        elif self.p_dict['Dline']=='D2':
-            interatorList = list(range(self.n[0],self.n[1]))
+
+        self.energySeparation[0] = Eg
+        if self.p_dict['Dline'] == 'D1':
+            DlineSelector = 0
+            self.energySeparation[1] = Ee[0:self.n[0]]
+        elif self.p_dict['Dline'] == 'D2':
+            DlineSelector = self.n[0]
+            self.energySeparation[1] = Ee[self.n[0]:]
 
         if self.p_dict['Pol'] == 0:
             bottom = 0
@@ -260,11 +266,7 @@ class atomicSystem:
         for i in range(self.n_states-1):
             for m in range(self.n[i]):
                 for n in range(self.n[i+1]):
-                    if self.p_dict['Dline'] == 'D1':
-                        k = n
-                    elif self.p_dict['Dline'] == 'D2':
-                        k = n + self.n[0]
-                    cleb = np.dot(Mg[m], Me[k][bottom:top]).real
+                    cleb = np.dot(Mg[m], Me[DlineSelector + n][bottom:top]).real
                     if np.abs(cleb) > 0.0223:  # see spectra.py: cleb2 > 0.0005
                         self.dme[i][m, n] = cleb * DME[i]
 
@@ -272,8 +274,7 @@ class atomicSystem:
                         self.states[i].j, self.f[i][m], self.mf[i][m],
                         self.states[i+1].j, self.f[i+1][n], self.mf[i+1][n]
                         )
-                    self.Gammas[i][m, n] = b * self.atom.getTransitionRate(
-                        *self.states[i+1]('nlj'), *self.states[i]('nlj')) / 2 / c.pi * 1e-6
+                    self.Gammas[i][m, n] = b * naturalLineWidth[i]
 
     def generateSymbols(self):
         #######################################################################
