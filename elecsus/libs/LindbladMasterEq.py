@@ -366,43 +366,16 @@ class atomicSystem:
             #######################################################################
             f_list, _, _, sgn_list = zip(*beams)
             E_list = [np.atleast_1d(beam.E) for beam in beams]
-
             w_ge = np.atleast_1d(f_list[0])
             sgn_ge = sgn_list[0]
             wavenumber_ge = self.f_resonance[0] / c.c
 
-            if len(beams) != 1:
-                w_er = np.atleast_1d(f_list[1])
-                sgn_er = sgn_list[1]
-                wavenumber_er = self.f_resonance[1] / c.c
-
             #######################################################################
             # Solve linear system
             #######################################################################
-            if self.n_states == 2:
-                t0 = datetime.now()
-                res = np.array([[np.linalg.solve(self.A(w, E), self.b) for E in E_list[0]] for w in w_ge])
-                print(datetime.now() - t0)
-            else:
-                if v is None:
-                    A = [[[[self.A(self.G_01_val, self.G_10_val,
-                                    w1, w2, E1, E2)
-                            for E2 in E_list[1]]
-                            for E1 in E_list[0]]
-                            for w2 in w_er]
-                            for w1 in w_ge]
-                else:
-                    w_ge = w_ge[0]
-                    w_er = w_er[0]
-                    A = [[[self.A(self.G_01_val, self.G_10_val,
-                                    w_ge + sgn_ge * wavenumber_ge * vi,
-                                    w_er + sgn_er * wavenumber_er * vi,
-                                    E1, E2)
-                            for E2 in E_list[1]]
-                            for E1 in E_list[0]]
-                            for vi in v]
-            # res = np.linalg.solve(A, b)
-            # sys.exit()
+            t0 = datetime.now()
+            res = np.array([[np.linalg.solve(self.A(w, E), self.b) for E in E_list[0]] for w in w_ge])
+            print(datetime.now() - t0)
 
             #######################################################################
             # Extract relevant information
@@ -429,10 +402,6 @@ class atomicSystem:
 
     def solve_w_doppler(self, beams, precision='high'):
         beam_ge = beams[0]
-        if len(beams) == 1:
-            beam_er = None
-        else:
-            beam_er = beams[1]
         # chi_dopp(∆) = \int p(v,T)chi(∆-kv)dv = (p*chi)(∆)
         # k = 1 / lam2bda = w/c
         w_ge, P_ge, D_ge, sgn_ge = beam_ge
@@ -440,48 +409,19 @@ class atomicSystem:
         P_ge = np.atleast_1d(P_ge)
         k_ge = self.f_resonance[0] / c.c / 1e6
 
-        if beam_er is not None:
-            w_er, P_er, D_er, sgn_er = beam_er
-            w_er = np.atleast_1d(w_er)
-            P_er = np.atleast_1d(P_er)
-            k_er = self.f_resonance[1] / c.c
-
-        if beam_er is None:
-            exci_state = np.ones((len(w_ge), len(P_ge)), dtype='float64')
-        else:
-            exci_state = np.zeros((len(w_ge), len(w_er), len(P_ge)), dtype='float64')
+        exci_state = np.ones((len(w_ge), len(P_ge)), dtype='float64')
         chi = np.zeros_like(exci_state, dtype='complex128')
 
         resolution = 2  # MHz
         v = np.arange(w_ge.min() - 1000, w_ge.max() + 1000, resolution)
         v_distribution = self.v_dist(np.subtract.outer(w_ge / k_ge, v))
         for i, P in enumerate(P_ge):
-            if beam_er is None:
                 # Use symmetry of convolution to calculate population_number
                 # once and instead calculate Maxwell Boltzmann distribution
                 # more often (which is computationally cheaper)
                 E, C = self.solve([beam(w=k_ge * v, P=P, D=D_ge, sgn=1)], precision=precision)
                 exci_state[:, i] = np.sum(v_distribution * E, axis=1) * resolution
                 chi[:, i] = np.sum(v_distribution * C, axis=1) * resolution
-            else:
-                # Create nonequidistant velocity distribution
-                # with equal bin probabilities. See nonequidistant_sampling.py
-                # for more.
-                binsize = 10000
-                epsilon = 1e-6
-                p_bounds = np.linspace(epsilon, 1-epsilon, binsize + 1)
-                p = (p_bounds[1:] + p_bounds[:-1]) / 2
-                v_bounds = self.cdfinv(p_bounds)
-                v = self.cdfinv(p)
-                dv = np.diff(v_bounds)
-                v_distribution = self.v_dist(v)
-
-                for m, wm in enumerate(tqdm.tqdm(w_er, position=1)):
-                    for n, wn in enumerate(tqdm.tqdm(w_ge, position=0, leave=False)):
-                        E, C = self.solve([beam(w=wn, P=P, D=D_ge, sgn=sgn_ge),
-                                          beam(w=wm, P=P_er, D=D_er, sgn=sgn_er)], v)
-                        exci_state[n, m, i] = np.sum(E * dv * v_distribution)
-                        chi[n, m, i] = np.sum(C * dv * v_distribution)
         return exci_state.squeeze(), chi.squeeze()
 
     def get_dynamic_xaxis(self):
