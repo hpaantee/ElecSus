@@ -101,23 +101,23 @@ class atomicSystem:
         elif element.lower() in ['k39', 'potassium39']:
             self.atom = arc.Potassium39()
             self.atom.abundance = 1 - (p_dict['K40frac'] + p_dict['K41frac']) / 100
-            self.isotopeShift = 15.87e6
+            self.isotopeShift = 15.87
         elif element.lower() in ['k40', 'potassium40']:
             self.atom = arc.Potassium40()
             self.atom.abundance = p_dict['K40frac'] / 100
-            self.isotopeShift = -109.773e6
+            self.isotopeShift = -109.773
         elif element.lower() in ['k41', 'potassium41']:
             self.atom = arc.Potassium41()
             self.atom.abundance = p_dict['K41frac'] / 100
-            self.isotopeShift = -219.625e6
+            self.isotopeShift = -219.625
         elif element.lower() in ['rb85', 'rubidium85']:
             self.atom = arc.Rubidium85()
             self.atom.abundance = p_dict['rb85frac'] / 100
-            self.isotopeShift = 21.734e6
+            self.isotopeShift = 21.734
         elif element.lower() in ['rb87', 'rubidium87']:
             self.atom = arc.Rubidium87()
             self.atom.abundance = 1 - p_dict['rb85frac'] / 100
-            self.isotopeShift = -56.361e6
+            self.isotopeShift = -56.361
         elif element.lower() in ['cs', 'cs133', 'caesium', 'caesium133']:
             self.atom = arc.Caesium()
         else:
@@ -212,9 +212,9 @@ class atomicSystem:
         self.n = np.array([len(mf) for mf in self.mf])
         self.total_levels = sum([len(mf) for mf in self.mf])
 
-        self.transit_time = self.getTransitTime()
+        self.transit_time = self.getTransitTime() * 1e6
 
-        self.energySeparation = [self.atom.breitRabi(*state('nlj'), np.array([self.p_dict['Bfield']/1e4]))[0][0]
+        self.energySeparation = [self.atom.breitRabi(*state('nlj'), np.array([self.p_dict['Bfield']/1e4]))[0][0] * 1e-6
                                  for state in self.states]
         self.energySeparation[0] += self.isotopeShift
         self.slices = [slice(self.n[0:i].sum(), self.n[0:i+1].sum()) for i in range(self.n_states)]
@@ -273,7 +273,7 @@ class atomicSystem:
                         self.states[i+1].j, self.f[i+1][n], self.mf[i+1][n]
                         )
                     self.Gammas[i][m, n] = b * self.atom.getTransitionRate(
-                        *self.states[i+1]('nlj'), *self.states[i]('nlj')) / 2 / c.pi
+                        *self.states[i+1]('nlj'), *self.states[i]('nlj')) / 2 / c.pi * 1e-6
 
     def generateSymbols(self):
         #######################################################################
@@ -293,8 +293,7 @@ class atomicSystem:
         #######################################################################
         self.H_rabi = sy.zeros(self.total_levels, self.total_levels)
         for i in range(self.n_states-1):
-            self.H_rabi[self.slices[i], self.slices[i+1]] = 0.5 * self.dme[i] * self.Efield[i] / c.h
-        # self.H_rabi = self.H_rabi + self.H_rabi.conjugate().transpose()
+            self.H_rabi[self.slices[i], self.slices[i+1]] = 0.5e-6 / c.h * self.dme[i] * self.Efield[i]
         self.H_rabi = self.H_rabi + self.H_rabi.transpose()
 
         detunings = np.concatenate([-self.energySeparation[i]+self.wL[0:i].sum()
@@ -326,38 +325,12 @@ class atomicSystem:
             mask = np.full((self.total_levels, self.total_levels), False)
             mask[self.slices[i], self.slices[i+1]] = True
             self.transition_list.append(self.matrix2list(mask))
-        # print(self.r_list[self.transition_list[0]])
-        # sys.exit()
-
         A, b = sy.linear_eq_to_matrix(self.system_matrix, self.r_list)
-        # print(f'Symbolic operations: {se.count_ops(A):.2e}')
-        # A = sy.simplify(A, rational=None)
-        # print(f'Symbolic operations: {se.count_ops(A):.2e}')
-
-        self.useSymbolic = False
-        if self.useSymbolic:
-            A, b = sy.linear_eq_to_matrix(self.system_matrix.expand(), self.r_list)
-            print(f'Symbolic operations: {se.count_ops(A):.2e}')
-            # A = sy.simplify(A, rational=None)
-            # import pickle
-            # with open('matrix_Ab.dat', 'wb') as f:
-            #     pickle.dump([A, b], f)
-            A = se.Matrix(A)
-            b = se.Matrix(b)
-            print('solve...')
-            sol = A.LUsolve(b)
-            print(f'Symbolic operations: {se.count_ops(sol):.2e}')
-            print('solved')
-            print(sol.subs({self.wL[0]: 1550, self.Efield[0]: 1e-4}))
-            # self.solution = se.Lambdify([*self.wL, *self.Efield], sol, real=False, cse=True)
-            print('lambdified')
-            sys.exit()
-            return 0, 0
-
+        # A = A.simplify(rational=None)
         A = se.Matrix(A)
-        A = se.Lambdify([*self.wL, *self.Efield], A, real=False, cse=True, dtype=np.complex64)
+        A = se.Lambdify([*self.wL, *self.Efield], A, real=False, cse=True)
         # b is always just an vector with zeros and the first entry being one
-        b = np.zeros((self.total_levels**2, 1), dtype=np.complex64)
+        b = np.zeros((self.total_levels**2, 1))
         b[0] = 1
         return A, b
 
@@ -406,31 +379,30 @@ class atomicSystem:
             #######################################################################
             # Solve linear system
             #######################################################################
-            if self.useSymbolic:
-                # print(self.solution(1550, 1e-4))
-                res = np.array([[self.solution(w, E) for E in E_list[0]] for w in w_ge])
+            if self.n_states == 2:
+                t0 = datetime.now()
+                res = np.array([[np.linalg.solve(self.A(w, E), self.b) for E in E_list[0]] for w in w_ge])
+                print(datetime.now() - t0)
             else:
-                if self.n_states == 2:
-                    A = [[self.A(w, E) for E in E_list[0]] for w in w_ge]
+                if v is None:
+                    A = [[[[self.A(self.G_01_val, self.G_10_val,
+                                    w1, w2, E1, E2)
+                            for E2 in E_list[1]]
+                            for E1 in E_list[0]]
+                            for w2 in w_er]
+                            for w1 in w_ge]
                 else:
-                    if v is None:
-                        A = [[[[self.A(self.G_01_val, self.G_10_val,
-                                       w1, w2, E1, E2)
-                                for E2 in E_list[1]]
-                                for E1 in E_list[0]]
-                                for w2 in w_er]
-                                for w1 in w_ge]
-                    else:
-                        w_ge = w_ge[0]
-                        w_er = w_er[0]
-                        A = [[[self.A(self.G_01_val, self.G_10_val,
-                                        w_ge + sgn_ge * wavenumber_ge * vi,
-                                        w_er + sgn_er * wavenumber_er * vi,
-                                        E1, E2)
-                                for E2 in E_list[1]]
-                                for E1 in E_list[0]]
-                                for vi in v]
-                res = np.linalg.solve(A, self.b)
+                    w_ge = w_ge[0]
+                    w_er = w_er[0]
+                    A = [[[self.A(self.G_01_val, self.G_10_val,
+                                    w_ge + sgn_ge * wavenumber_ge * vi,
+                                    w_er + sgn_er * wavenumber_er * vi,
+                                    E1, E2)
+                            for E2 in E_list[1]]
+                            for E1 in E_list[0]]
+                            for vi in v]
+            # res = np.linalg.solve(A, b)
+            # sys.exit()
 
             #######################################################################
             # Extract relevant information
