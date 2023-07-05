@@ -236,23 +236,20 @@ class atomicSystem:
         #        for i in range(self.n_states-1)]
         # self.dipole_moments = [np.sqrt(SFF[i]/3) * DME[i]
         #                        for i in range(self.n_states-1)]
-
         self.dme = [np.zeros((self.n[i], self.n[i+1])) for i in range(self.n_states-1)]
         self.Gammas = [np.zeros((self.n[i], self.n[i+1])) for i in range(self.n_states-1)]
-        H = ES.Hamiltonian(self.element, self.p_dict['Dline'], self.atom.gL, self.p_dict['Bfield'])
-        Eg = H.groundEnergies
-        Ee = H.excitedEnergies
+        H = ES.Hamiltonian(self.element, self.p_dict['Dline'], 1.0, self.p_dict['Bfield'])
+        # atom.gL
         Mg = np.array(H.groundManifold)[:,1:]  # Cut off energy eigenvalues
         Me = np.array(H.excitedManifold)[:,1:]
 
-
-        self.energySeparation[0] = Eg
+        self.energySeparation[0] = H.groundEnergies
         if self.p_dict['Dline'] == 'D1':
-            DlineSelector = 0
-            self.energySeparation[1] = Ee[0:self.n[0]]
+            DlineIndexOffset = 0
+            self.energySeparation[1] = H.excitedEnergies[0:self.n[0]]
         elif self.p_dict['Dline'] == 'D2':
-            DlineSelector = self.n[0]
-            self.energySeparation[1] = Ee[self.n[0]:]
+            DlineIndexOffset = self.n[0]
+            self.energySeparation[1] = H.excitedEnergies[self.n[0]:]
 
         if self.p_dict['Pol'] == 0:
             bottom = 0
@@ -267,9 +264,8 @@ class atomicSystem:
         for i in range(self.n_states-1):
             for m in range(self.n[i]):
                 for n in range(self.n[i+1]):
-                    cleb = np.dot(Mg[m], Me[DlineSelector + n][bottom:top]).real
-                    if np.abs(cleb) > 0.0223:  # see spectra.py: cleb2 > 0.0005
-                        self.dme[i][m, n] = cleb * DME[i]
+                    cleb = np.dot(Mg[m], Me[DlineIndexOffset + n][bottom:top]).real
+                    self.dme[i][m, n] = cleb * DME[i]
 
                     b = self.atom.getBranchingRatio(
                         self.states[i].j, self.f[i][m], self.mf[i][m],
