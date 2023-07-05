@@ -223,7 +223,8 @@ class atomicSystem:
         # d^2 = 1/3 * SFF' * |<J||er||J'>|^2
         # Ω = d * E / hbar = sqrt(SFF/3) * |<J||er||J'>| * E / hbar
         # Ref: Steck, Daniel A. "Rubidium 85 D Line Data" (2009), p. 10
-        DME = [self.atom.getReducedMatrixElementJ_asymmetric(
+        # DME: see Steck eq. 60; note the missing sqrt
+        DME = [np.sqrt((2*self.states[i].j+1) / (2*self.states[i+1].j+1)) * self.atom.getReducedMatrixElementJ_asymmetric(
             *self.states[i]('nlj'), *self.states[i+1]('nlj'))
             * c.e * c.physical_constants['Bohr radius'][0]
             for i in range(self.n_states-1)]
