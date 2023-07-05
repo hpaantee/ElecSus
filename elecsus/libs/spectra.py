@@ -99,7 +99,7 @@ def FreqStren(groundLevels,excitedLevels,groundDim,
 	if Dline=='D1':
 		interatorList = list(range(groundDim))
 	elif Dline=='D2':
-		interatorList = list(range(groundDim,excitedDim))\
+		interatorList = list(range(groundDim,excitedDim))
 
 	# find difference in energies and do dot product between (all) ground states
 	# 	and selected parts of excited state matrix
