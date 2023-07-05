@@ -305,7 +305,7 @@ class atomicSystem:
         G = np.zeros((self.total_levels, self.total_levels))
         G[self.slices[0], self.slices[0]] = 1 / self.n[0] / self.transit_time
         for i in range(self.n_states-1):
-            G[self.slices[i+1], self.slices[i]] = self.Gammas[i].T
+            G[self.slices[i+1], self.slices[i]] = self.Gammas[i].T + self.p_dict['GammaBuf']
 
         # Ref: Weller, PhD thesis, p. 14, eq. 1.13
         L = sy.zeros(self.total_levels, self.total_levels)
