@@ -411,7 +411,7 @@ class atomicSystem:
         chi = np.zeros_like(exci_state, dtype='complex128')
 
         resolution = 2  # MHz
-        v = np.arange(w_ge.min() - 1000, w_ge.max() + 1000, resolution)
+        v = np.arange(w_ge.min()/k_ge - 1000, w_ge.max()/k_ge + 1000, resolution)
         v_distribution = self.v_dist(np.subtract.outer(w_ge / k_ge, v))
         for i, P in enumerate(P_ge):
                 # Use symmetry of convolution to calculate population_number
