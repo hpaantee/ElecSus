@@ -238,8 +238,7 @@ class atomicSystem:
         #                        for i in range(self.n_states-1)]
         self.dme = [np.zeros((self.n[i], self.n[i+1])) for i in range(self.n_states-1)]
         self.Gammas = [np.zeros((self.n[i], self.n[i+1])) for i in range(self.n_states-1)]
-        H = ES.Hamiltonian(self.element, self.p_dict['Dline'], 1.0, self.p_dict['Bfield'])
-        # atom.gL
+        H = ES.Hamiltonian(self.element, self.p_dict['Dline'], self.atom.gL, self.p_dict['Bfield'])
         Mg = np.array(H.groundManifold)[:,1:]  # Cut off energy eigenvalues
         Me = np.array(H.excitedManifold)[:,1:]
 
