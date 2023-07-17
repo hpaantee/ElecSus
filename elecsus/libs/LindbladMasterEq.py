@@ -263,14 +263,12 @@ class atomicSystem:
         for i in range(self.n_states-1):
             for m in range(self.n[i]):
                 for n in range(self.n[i+1]):
-                    cleb = np.dot(Mg[m], Me[DlineIndexOffset + n][bottom:top]).real
-                    self.dme[i][m, n] = cleb * DME[i]
-
                     b = self.atom.getBranchingRatio(
                         self.states[i].j, self.f[i][m], self.mf[i][m],
                         self.states[i+1].j, self.f[i+1][n], self.mf[i+1][n]
                         )
-                    self.Gammas[i][m, n] = b * naturalLineWidth[i]
+                    self.Gammas[i][m, n] = b * self.naturalLineWidth[i] + self.p_dict['GammaBuf']
+        self.dme[0] = np.matmul(Mg, Me[DlineIndexOffset:DlineIndexOffset+self.n[1], bottom:top].T).real * DME[0]
 
     def generateSymbols(self):
         #######################################################################
