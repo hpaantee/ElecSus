@@ -299,7 +299,7 @@ class atomicSystem:
         G = np.zeros((self.total_levels, self.total_levels))
         G[self.slices[0], self.slices[0]] = 1 / self.n[0] / self.transit_time
         for i in range(self.n_states-1):
-            G[self.slices[i+1], self.slices[i]] = self.Gammas[i].T + self.p_dict['GammaBuf']
+            G[self.slices[i+1], self.slices[i]] = self.Gammas[i].T
 
         # Ref: Weller, PhD thesis, p. 14, eq. 1.13
         L = sy.zeros(self.total_levels, self.total_levels)
@@ -310,7 +310,13 @@ class atomicSystem:
                     for k in range(self.total_levels):
                         L[i, j] -= 0.5 * (G[i, k] + G[j, k]) * self.r[i, j]
 
-        self.master_equation = -sy.I * (self.H*self.r - self.r*self.H) - L#  - Ldeph
+        Ldeph = sy.zeros(self.total_levels, self.total_levels)
+        for i in range(self.total_levels):
+            for j in range(self.total_levels):
+                if (i != j):
+                    L[i, j] -= 0.25 * G[i, j] * self.r[i, j]
+
+        self.master_equation = -sy.I * (self.H*self.r - self.r*self.H) - L  - Ldeph
 
     def generate_linear_system(self):
         self.r_list = self.matrix2list(self.r)
