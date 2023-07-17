@@ -108,7 +108,7 @@ def FreqStren(groundLevels,excitedLevels,groundDim,
 			cleb = dot(groundLevels[gg][1:],excitedLevels[ee][bottom:top]).real
 			cleb2 = cleb*cleb
 			if cleb2 > 0.0005: #If negligable don't calculate.
-				transitionFrequency[transNo] = int((-groundLevels[gg][0].real
+				transitionFrequency[transNo] = float((-groundLevels[gg][0].real
 											  +excitedLevels[ee][0].real))
 				# We choose to perform the ground manifold reduction (see
 				# equation (4) in manual) here for convenience.
