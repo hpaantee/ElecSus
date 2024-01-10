@@ -1,5 +1,6 @@
 import arc
 import copy
+import logging
 import numpy as np
 import os
 import sys
@@ -17,6 +18,9 @@ import EigenSystem as ES
 from sympy import *
 from sympy.printing.latex import latex
 init_printing(use_unicode=True) # allow LaTeX printing
+
+
+log = logging.basicConfig('LME', level=logging.INFO)
 
 class state:
     def __init__(self, n, l, j, f=None):
@@ -64,7 +68,7 @@ class beam:
     def setP(self, P, profile):
         self.P = P
         # I = 1/2 * c * epsilon_0 * E0**2
-        print(f'Beam profile used: {profile}')
+        log.info(f'Beam profile used: {profile}')
         if profile == 'flat':
             I = P / self.A
         elif profile == 'gaussian':
@@ -134,6 +138,7 @@ class atomicSystem:
         else:
             raise ValueError
 
+
         self.states = copy.deepcopy(states)
         self.max_allowed_states = 3
         self.n_states = len(states)
@@ -148,19 +153,14 @@ class atomicSystem:
         self.beam_diameter = p_dict['laserWaist']
         self.p_dict = p_dict
 
-        print('Init system properties')
         self.initSystemProperties()
-        print('Generate symbols')
         self.generateSymbols()
-        print('Generate matrices')
         self.generateMatrices()
-        print('subs')
         # Add constrain that total population has to be 1
         self.system_matrix = self.master_equation.as_mutable()
         # self.system_matrix = self.system_matrix.subs({'tau_t': self.transit_time})
         self.system_matrix[0] = -1 + self.r.trace()
         self.A, self.b = self.generate_linear_system()
-        print('finished init()')
         # self.atom.conn.close()
 
     def update_transit(self, mean_speed):
@@ -408,17 +408,16 @@ class atomicSystem:
         # g_transit[self.slices[1], self.slices[0]] = 1 / tau_t / self.n[0] / transit_factor * sy.ones(self.n[1], self.n[0])
 
         if 'collisions' not in self.p_dict:
+            log.warning('Implicitly assume decaying collisions')
             self.p_dict['collisions'] = 'decay'
         if self.p_dict['collisions'] == 'decay':
-            print('decaying collisions!')
+            log.info('decaying collisions!')
             # g_col[self.slices[0], self.slices[0]] = self.p_dict['GammaBuf'] / self.n[0]
             g_col[self.slices[1], self.slices[0]] = self.p_dict['GammaBuf'] / self.n[0]
-            print('1')
             L_dec = Lindblad_decay(g_dec + g_transit + g_col)
-            print('2')
             self.master_equation = -sy.I * (self.H*self.r - self.r*self.H) - L_dec
         elif self.p_dict['collisions'] == 'dephase':
-            print('dephasing collisions!')
+            log.info('dephasing collisions!')
             # g_col[self.slices[0], self.slices[0]] = self.p_dict['GammaBuf']
             g_col[self.slices[1], self.slices[0]] = self.p_dict['GammaBuf']
             g_col[self.slices[0], self.slices[1]] = self.p_dict['GammaBuf']
@@ -494,6 +493,7 @@ class atomicSystem:
             #######################################################################
             # Solve linear system
             #######################################################################
+            log.debug('Solve linear system')
             res = np.array([[np.linalg.solve(self.A(w, E), self.b) for E in E_list[0]] for w in w_ge])
 
             #######################################################################
