@@ -14,6 +14,9 @@ from scipy.interpolate import RectBivariateSpline
 import matplotlib.pyplot as plt
 import EigenSystem as ES
 
+from sympy import *
+from sympy.printing.latex import latex
+init_printing(use_unicode=True) # allow LaTeX printing
 
 class state:
     def __init__(self, n, l, j, f=None):
@@ -40,6 +43,7 @@ class state:
 class beam:
     def __init__(self, **kwargs):
         self.w = kwargs['w']
+        self.profile = kwargs['profile']
         if 'sgn' in kwargs:
             self.sgn = kwargs['sgn']
         else:
@@ -55,13 +59,20 @@ class beam:
         if 'E' in kwargs:
             self.setE(kwargs['E'])
         else:
-            self.setP(kwargs['P'])
+            self.setP(kwargs['P'], kwargs['profile'])
 
-    def setP(self, P):
+    def setP(self, P, profile):
         self.P = P
         # I = 1/2 * c * epsilon_0 * E0**2
-        I = 2 * P / self.A
+        print(f'Beam profile used: {profile}')
+        if profile == 'flat':
+            I = P / self.A
+        elif profile == 'gaussian':
+            I = 2 * P / self.A
+        else:
+            raise KeyError('no beam profile specified')
         self.E = np.sqrt(2 * I / c.c / c.epsilon_0)
+
 
     def setE(self, E):
         self.E = E
@@ -137,11 +148,27 @@ class atomicSystem:
         self.beam_diameter = p_dict['laserWaist']
         self.p_dict = p_dict
 
+        print('Init system properties')
         self.initSystemProperties()
+        print('Generate symbols')
         self.generateSymbols()
+        print('Generate matrices')
         self.generateMatrices()
+        print('subs')
         # Add constrain that total population has to be 1
         self.system_matrix = self.master_equation.as_mutable()
+        # self.system_matrix = self.system_matrix.subs({'tau_t': self.transit_time})
+        self.system_matrix[0] = -1 + self.r.trace()
+        self.A, self.b = self.generate_linear_system()
+        print('finished init()')
+        # self.atom.conn.close()
+
+    def update_transit(self, mean_speed):
+        self.transit_time = self.getTransitTime(mean_speed) * 1e6
+        print(f'Updated transit time: {self.transit_time}')
+        # self.generateMatrices()
+        self.system_matrix = self.master_equation.as_mutable()
+        self.system_matrix = self.system_matrix.subs({'tau_t': self.transit_time})
         self.system_matrix[0] = -1 + self.r.trace()
         self.A, self.b = self.generate_linear_system()
 
@@ -192,13 +219,27 @@ class atomicSystem:
                     * wigner_6j(state2.j, fj, self.atom.I, fi, state1.j, 1)**2
         return B
 
-    def getTransitTime(self):
+    def getTransitTime(self, mean_speed=None):
         # Ref: ARC-Alkali-Rydberg-Calculator Web interface (click 'View code')
         # in s
-        mean_speed = self.atom.getAverageSpeed(self.DoppT)
-        beam_fwhm = self.beam_diameter / 2 / 0.8493218
-        tau = np.sqrt(c.pi) * beam_fwhm / (2 * mean_speed)
+        if mean_speed is None:
+            mean_speed = self.atom.getAverageSpeed(self.DoppT)
+        # beam_fwhm = self.beam_diameter / 2 / 0.8493218
+        # tau = np.sqrt(c.pi) * beam_fwhm / (2 * mean_speed
+        # print(f'transit-time: {tau}')
+        # print(f'transit broadening: {1 / tau / self.n[0] / 4}')
+        # print(1/tau)
+        # Sagle
+        G = np.sqrt(8*c.k*self.DoppT/c.pi / self.atom.mass) / self.beam_diameter
+        tau = self.beam_diameter / np.abs(mean_speed)
+        # print(tau)
+        # print(1/G)
+        # sys.exit()
+        # return 1 / G
+        # print(G)
+        # sys.exit()
         return tau
+
 
     def initSystemProperties(self):
         self.f_resonance = np.array([self.atom.getTransitionFrequency(
@@ -213,10 +254,12 @@ class atomicSystem:
         self.total_levels = sum([len(mf) for mf in self.mf])
 
         self.transit_time = self.getTransitTime() * 1e6
+        if 'Gammat' in self.p_dict:
+            self.transit_time = self.p_dict['Gammat'] * 1e6
 
-        self.energySeparation = [self.atom.breitRabi(*state('nlj'), np.array([self.p_dict['Bfield']/1e4]))[0][0] * 1e-6
-                                 for state in self.states]
-        self.energySeparation[0] += self.isotopeShift
+        # self.energySeparation = [self.atom.breitRabi(*state('nlj'), np.array([self.p_dict['Bfield']/1e4]))[0][0] * 1e-6
+        #                          for state in self.states]
+        # self.energySeparation[0] += self.isotopeShift
         self.slices = [slice(self.n[0:i].sum(), self.n[0:i+1].sum()) for i in range(self.n_states)]
         # dipole matrix moment: |<J||er||J'>|
         # SFF'(F->F') = (2F'+1)(2J+1){J, J', 1, F', F, I}^2
@@ -228,7 +271,8 @@ class atomicSystem:
             *self.states[i]('nlj'), *self.states[i+1]('nlj'))
             * c.e * c.physical_constants['Bohr radius'][0]
             for i in range(self.n_states-1)]
-        naturalLineWidth = [self.atom.getTransitionRate(
+        # print(DME)
+        self.naturalLineWidth = [self.atom.getTransitionRate(
             *self.states[i+1]('nlj'), *self.states[i]('nlj')) / 2 / c.pi * 1e-6
             for i in range(self.n_states-1)]
         # SFF = [self.getSFF(self.states[i].F(self.sublevels[i]),
@@ -242,6 +286,7 @@ class atomicSystem:
         Mg = np.array(H.groundManifold)[:,1:]  # Cut off energy eigenvalues
         Me = np.array(H.excitedManifold)[:,1:]
 
+        self.energySeparation = [None] * self.n_states
         self.energySeparation[0] = H.groundEnergies
         if self.p_dict['Dline'] == 'D1':
             DlineIndexOffset = 0
@@ -250,25 +295,44 @@ class atomicSystem:
             DlineIndexOffset = self.n[0]
             self.energySeparation[1] = H.excitedEnergies[self.n[0]:]
 
-        if self.p_dict['Pol'] == 0:
-            bottom = 0
-            top = self.n[0]
-        elif self.p_dict['Pol'] == 50:
-            bottom = self.n[0]
-            top = 2*self.n[0]
-        elif self.p_dict['Pol'] == 100:
-            bottom = 2*self.n[0]
-            top = Me.shape[0]
+        # if self.p_dict['Pol'] == 0:
+        #     bottom = 0
+        #     top = self.n[0]
+        # elif self.p_dict['Pol'] == 50:
+        #     bottom = self.n[0]
+        #     top = 2*self.n[0]
+        # elif self.p_dict['Pol'] == 100:
+        #     bottom = 2*self.n[0]
+        #     top = Me.shape[0]
 
-        for i in range(self.n_states-1):
-            for m in range(self.n[i]):
-                for n in range(self.n[i+1]):
-                    b = self.atom.getBranchingRatio(
-                        self.states[i].j, self.f[i][m], self.mf[i][m],
-                        self.states[i+1].j, self.f[i+1][n], self.mf[i+1][n]
-                        )
-                    self.Gammas[i][m, n] = b * self.naturalLineWidth[i] + self.p_dict['GammaBuf']
-        self.dme[0] = np.matmul(Mg, Me[DlineIndexOffset:DlineIndexOffset+self.n[1], bottom:top].T).real * DME[0]
+        # self.eigv2 = np.concatenate([Mg, Me[DlineIndexOffset:DlineIndexOffset+self.n[1], bottom:top]])
+        # self.eigv = sp.linalg.block_diag(Mg, Me[DlineIndexOffset:DlineIndexOffset+self.n[1], bottom:top])
+        self.eigv = np.diag(np.ones(self.total_levels))
+
+        # np.set_printoptions(suppress=True, formatter={'float_kind':'{:+.3f}'.format})
+
+        # for i in range(self.n_states-1):
+        #     for m in range(self.n[i]):
+        #         for n in range(self.n[i+1]):
+        #             # tmp[m,n] =
+        #             b = self.atom.getBranchingRatio(
+        #                 self.states[i].j, self.f[i][m], self.mf[i][m],
+        #                 self.states[i+1].j, self.f[i+1][n], self.mf[i+1][n]
+        #                 )
+        #             self.Gammas[i][m, n] = b * naturalLineWidth[i]
+        dme_r = np.matmul(Mg, Me[DlineIndexOffset:DlineIndexOffset+self.n[1], 0*self.n[0]:self.n[0]].T).real
+        dme_z = np.matmul(Mg, Me[DlineIndexOffset:DlineIndexOffset+self.n[1], self.n[0]:2*self.n[0]].T).real
+        dme_l = np.matmul(Mg, Me[DlineIndexOffset:DlineIndexOffset+self.n[1], 2*self.n[0]:3*self.n[0]].T).real
+        dme_squared = np.power(dme_r, 2) + np.power(dme_z, 2) + np.power(dme_l, 2)
+        self.Gammas[0] = dme_squared * self.naturalLineWidth[0]
+        self.test = dme_squared * sy.symbols('\\Gamma_{nat}')
+
+        if self.p_dict['Pol'] == 0: # RCP
+            self.dme[0] = dme_r * DME[0]
+        elif self.p_dict['Pol'] == 50: #LP
+            self.dme[0] = 1 / np.sqrt(2) * (dme_r + dme_l) * DME[0]
+        elif self.p_dict['Pol'] == 100: # LCP
+            self.dme[0] = dme_l * DME[0]
 
     def generateSymbols(self):
         #######################################################################
@@ -278,7 +342,7 @@ class atomicSystem:
         self.wL = np.array([sy.symbols(f'w_{i}{i+1}') for i in range(self.n_states-1)])
         self.Efield = np.array([sy.symbols(f'Efield_{i}{i+1}') for i in range(self.n_states-1)])
         self.r_individual = sy.symbols(
-            f'\\rho_{{(0:{self.total_levels})_(0:{self.total_levels})}}')
+            f'\\rho_{{(0:{self.total_levels})/(0:{self.total_levels})}}')
         self.r = sy.Matrix(self.total_levels,
                            self.total_levels, self.r_individual)
 
@@ -296,36 +360,92 @@ class atomicSystem:
         self.H_energylevels = sy.diag(*detunings)
         self.H = self.H_rabi + self.H_energylevels
 
-        G = np.zeros((self.total_levels, self.total_levels))
-        G[self.slices[0], self.slices[0]] = 1 / self.n[0] / self.transit_time
-        for i in range(self.n_states-1):
-            G[self.slices[i+1], self.slices[i]] = self.Gammas[i].T
+        # Make Lindblad
+        def Lindblad_decay(rates):
+            L = sy.zeros(self.total_levels, self.total_levels)
+            for i in range(self.total_levels):
+                for j in range(self.total_levels):
+                    c = sy.Matrix(np.outer(self.eigv[i], self.eigv[j]).T)
+                    # L += rates[i,j] * (c@self.r@c.T - 0.5 * (c.T@c@self.r + self.r@c.T@c))
+                    # L += (rates[j, i] * self.r[j, j] - rates[i, j] * self.r[i, i]) * sy.Matrix(np.outer(self.eigv[i], self.eigv[i]))
+                    L[i,i] += (rates[j, i] * self.r[j, j] - rates[i, j] * self.r[i, i])
+                    if (i != j):
+                        for k in range(self.total_levels):
+                            # L -= 0.5 * (rates[i, k] + rates[j, k]) * self.r[i, j] * sy.Matrix(np.outer(self.eigv[i], self.eigv[j]))
+                            L[i,j] -= 0.5 * (rates[i, k] + rates[j, k]) * self.r[i, j]
+            return L
 
-        # Ref: Weller, PhD thesis, p. 14, eq. 1.13
-        L = sy.zeros(self.total_levels, self.total_levels)
-        for i in range(self.total_levels):
-            for j in range(self.total_levels):
-                L[i, i] += G[j, i] * self.r[j, j] - G[i, j] * self.r[i, i]
-                if (i != j):
-                    for k in range(self.total_levels):
-                        L[i, j] -= 0.5 * (G[i, k] + G[j, k]) * self.r[i, j]
+        def Lindblad_dephase(rates):
+            L = sy.zeros(self.total_levels, self.total_levels)
+            for i in range(self.total_levels):
+                for j in range(self.total_levels):
+                    if (i != j):
+                        L[i, j] -= 0.5 * rates[i, j] * self.r[i, j]
+            return L
 
-        Ldeph = sy.zeros(self.total_levels, self.total_levels)
-        for i in range(self.total_levels):
-            for j in range(self.total_levels):
-                if (i != j):
-                    L[i, j] -= 0.25 * G[i, j] * self.r[i, j]
+        # defining the correct Lindblad operators for transit-time and collisional broadening
+        g_dec = np.zeros((self.total_levels, self.total_levels))
+        g_col = np.zeros((self.total_levels, self.total_levels))
+        g_transit = np.zeros((self.total_levels, self.total_levels))
+        # Putting the decay in this part of the block matrix, we get decay.
+        # If we would put it into the other one, we would get spontaneous excitation
+        g_dec[self.slices[1], self.slices[0]] = self.Gammas[i].T
 
-        self.master_equation = -sy.I * (self.H*self.r - self.r*self.H) - L  - Ldeph
+        # Mixing between ground states due to transit time
+        # If we set diagonal to zero (no ground_0 to ground_0 state), we need to use self.n[0] - 1
+        if 'transit_factor' not in self.p_dict:
+            transit_factor = 1
+        else:
+            transit_factor = self.p_dict['transit_factor']
+
+        # tau_t = sy.symbols('tau_t')
+
+        g_transit[self.slices[0], self.slices[0]] = 1 / self.transit_time / self.n[0] / transit_factor
+        # "Decay" of excited states to ground states due to transit time
+        g_transit[self.slices[1], self.slices[0]] = 1 / self.transit_time / self.n[0] / transit_factor
+        # g_transit[self.slices[0], self.slices[0]] = 1 / tau_t / self.n[0] / transit_factor * sy.ones(self.n[0], self.n[0])
+        # # "Decay" of excited states to ground states due to transit time
+        # g_transit[self.slices[1], self.slices[0]] = 1 / tau_t / self.n[0] / transit_factor * sy.ones(self.n[1], self.n[0])
+
+        if 'collisions' not in self.p_dict:
+            self.p_dict['collisions'] = 'decay'
+        if self.p_dict['collisions'] == 'decay':
+            print('decaying collisions!')
+            # g_col[self.slices[0], self.slices[0]] = self.p_dict['GammaBuf'] / self.n[0]
+            g_col[self.slices[1], self.slices[0]] = self.p_dict['GammaBuf'] / self.n[0]
+            print('1')
+            L_dec = Lindblad_decay(g_dec + g_transit + g_col)
+            print('2')
+            self.master_equation = -sy.I * (self.H*self.r - self.r*self.H) - L_dec
+        elif self.p_dict['collisions'] == 'dephase':
+            print('dephasing collisions!')
+            # g_col[self.slices[0], self.slices[0]] = self.p_dict['GammaBuf']
+            g_col[self.slices[1], self.slices[0]] = self.p_dict['GammaBuf']
+            g_col[self.slices[0], self.slices[1]] = self.p_dict['GammaBuf']
+            L_dec = Lindblad_decay(g_dec + g_transit)
+            L_deph = Lindblad_dephase(g_col)
+            self.master_equation = -sy.I * (self.H*self.r - self.r*self.H) - L_dec - L_deph
+
 
     def generate_linear_system(self):
         self.r_list = self.matrix2list(self.r)
+        test = np.array(self.r_list)
         # Create list of off-diagonal elements relevant for i->j transition
         self.transition_list = []
         for i in range(self.n_states-1):
             mask = np.full((self.total_levels, self.total_levels), False)
             mask[self.slices[i], self.slices[i+1]] = True
             self.transition_list.append(self.matrix2list(mask))
+        self.transition_list2 = []
+        for i in range(self.n_states-1):
+            mask = np.full((self.total_levels, self.total_levels), False)
+            mask[self.slices[i+1], self.slices[i]] = True
+            self.transition_list2.append(self.matrix2list(mask))
+
+        # m = np.array(self.transition_list2).squeeze()
+        # print(test[m])
+        # print(m.shape)
+        # sys.exit()
         A, b = sy.linear_eq_to_matrix(self.system_matrix, self.r_list)
         # A = A.simplify(rational=None)
         A = se.Matrix(A)
@@ -374,9 +494,7 @@ class atomicSystem:
             #######################################################################
             # Solve linear system
             #######################################################################
-            t0 = datetime.now()
             res = np.array([[np.linalg.solve(self.A(w, E), self.b) for E in E_list[0]] for w in w_ge])
-            print(datetime.now() - t0)
 
             #######################################################################
             # Extract relevant information
@@ -397,6 +515,10 @@ class atomicSystem:
             state_population = np.array([np.sum(res[self.slices[i]], axis=0).real for i in range(self.n_states)])
             chi = np.array([self.atom.abundance * 2 * np.sum(res[self.transition_list[i]] * k_alt[i], axis=0)
                 for i in range(self.n_states-1)])
+            # chi = np.array([self.atom.abundance * (
+            #     np.sum(res[self.transition_list[i]] * k_alt[i], axis=0)
+            #     -np.sum(res[self.transition_list2[i]] * k_alt[i], axis=0))
+            #     for i in range(self.n_states-1)])
             return state_population[1].squeeze(), chi[0].squeeze()
         else:
             return self.solve_via_LUT(beams[0])
@@ -420,18 +542,18 @@ class atomicSystem:
                 # Use symmetry of convolution to calculate population_number
                 # once and instead calculate Maxwell Boltzmann distribution
                 # more often (which is computationally cheaper)
-                E, C = self.solve([beam(w=k_ge * v, P=P, D=D_ge, sgn=1)], precision=precision)
+                E, C = self.solve([beam(w=k_ge * v, P=P, D=D_ge, sgn=1, profile=beam_ge.profile)], precision=precision)
                 exci_state[:, i] = np.sum(v_distribution * E, axis=1) * resolution
                 chi[:, i] = np.sum(v_distribution * C, axis=1) * resolution
         return exci_state.squeeze(), chi.squeeze()
 
     def get_dynamic_xaxis(self):
-        bounds = [-4000, 6000]
+        bounds = [5000, 18000]
         low_resolution = 20  # MHz
         high_resolution = 2  # MHz
 
         # Initial scan of optical depth to obtain threshold for regions of interest
-        x = np.arange(*bounds, high_resolution) * 1e6
+        x = np.arange(*bounds, high_resolution)
         y = self.optical_depth([beam(w=x, P=1e-15, D=1)], doppler=False)
         limit = 1e-4 * y.min()
 
@@ -441,8 +563,8 @@ class atomicSystem:
         idx_high_r = idx_high[np.where(abs(np.diff(idx_high))>1)[0] + 1]
 
         # Recreate the x axis, now with different resolutions depending on the frequency
-        x_low = np.arange(*bounds, low_resolution) * 1e6
-        x_high = [np.arange(*x[np.array(i)], high_resolution*1e6) for i in zip(idx_high_l, idx_high_r)]
+        x_low = np.arange(*bounds, low_resolution)
+        x_high = [np.arange(*x[np.array(i)], high_resolution) for i in zip(idx_high_l, idx_high_r)]
         x_new = np.sort(np.unique(np.concatenate([x_low, *x_high], axis=None)))
         return x_new
 
@@ -477,7 +599,7 @@ class atomicSystem:
             os.makedirs(f'{basedir}/LUT', exist_ok=True)
             print(f'Generating LUT file {LUT_file}!')
             detunings = self.get_dynamic_xaxis()
-            powers = np.geomspace(1e-12, 1, 15001, endpoint=True)
+            powers = np.geomspace(1e-9, 1e-1, 1000, endpoint=True)
             beam_diameter = 1e-3
             chi = np.empty((detunings.size, powers.size), dtype=np.complex128)
             for i, p in enumerate(tqdm.tqdm(powers)):
@@ -502,38 +624,47 @@ class atomicSystem:
         return 4 * c.pi * self.f_resonance[0] / c.c * n_imag
 
     def propagated_transmission(self, beams, z=50e-3, doppler=True, steps=50):
-        w, P, D, _ = beams[0]
+        w, P0, D, _ = beams[0]
         dz = z / steps
-        detunings, powers, beam_diameter, chi = self.LUT()
-        chi_real = RectBivariateSpline(detunings, powers, chi.real, kx=1, ky=1)
-        chi_imag = RectBivariateSpline(detunings, powers, chi.imag, kx=1, ky=1)
-
-        P0 = P * (beam_diameter / D)#**2
-        n = self.atom.getNumberDensity(self.T)
-        k = self.f_resonance[0] / c.c
-        resolution = 2  # MHz
-        v = np.arange(w.min()/1e6 - 1000, w.max()/1e6 + 1000, resolution)
-        v_distribution = self.v_dist(np.subtract.outer(w / k, v))
-        # Initialize some variables
-        P = np.zeros((steps+1, len(beams[0].w)))
-        T = np.ones((steps+1, len(beams[0].w)))
+        P = np.zeros((steps+1, len(w)))
+        T = np.ones((steps+1, len(w)))
         P[0] = P0
-        abs_pref = dz * 4 * c.pi * self.f_resonance[0] / c.c
 
         for i in range(1, steps+1):
-            # RectBivariateSpline wants strictly increasing values for x and y.
-            # The detuning fulfills this naturally, but power not.
-            # So we sort it and later "unsort" it again
-            if doppler:
-                sequence = np.argsort(P[i-1])
-                chi_t = chi_real(k*v, P[i-1][sequence], grid=True) + 1j * chi_imag(k*v, P[i-1][sequence], grid=True)
-                chi = np.sum(v_distribution * chi_t.T[sequence.argsort()], axis=1) * resolution
-            else:
-                chi = chi_real(w, P[i-1], grid=False) + 1j * chi_imag(w, P[i-1], grid=False)
-            T[i] = np.exp(abs_pref * np.sqrt(1. + chi * n).imag)
+            T[i] = self.transmission([beam(w=w, P=P[i-1].min(), D=D, profile=beams[0].profile)], z=dz, doppler=doppler)
             P[i] = T[i] * P[i-1]
         T = np.product(T, axis=0)
         return T
+        # detunings, powers, beam_diameter, chi = self.LUT()
+        # chi_real = RectBivariateSpline(detunings, powers, chi.real, kx=1, ky=1)
+        # chi_imag = RectBivariateSpline(detunings, powers, chi.imag, kx=1, ky=1)
+
+        # P0 = P * (beam_diameter / D)#**2
+        # n = self.atom.getNumberDensity(self.T)
+        # k = self.f_resonance[0] / c.c
+        # resolution = 2  # MHz
+        # v = np.arange(w.min()/1e6 - 1000, w.max()/1e6 + 1000, resolution)
+        # v_distribution = self.v_dist(np.subtract.outer(w / k, v))
+        # # Initialize some variables
+        # P = np.zeros((steps+1, len(beams[0].w)))
+        # T = np.ones((steps+1, len(beams[0].w)))
+        # P[0] = P0
+        # abs_pref = dz * 4 * c.pi * self.f_resonance[0] / c.c
+
+        # for i in range(1, steps+1):
+        #     # RectBivariateSpline wants strictly increasing values for x and y.
+        #     # The detuning fulfills this naturally, but power not.
+        #     # So we sort it and later "unsort" it again
+        #     if doppler:
+        #         sequence = np.argsort(P[i-1])
+        #         chi_t = chi_real(k*v, P[i-1][sequence], grid=True) + 1j * chi_imag(k*v, P[i-1][sequence], grid=True)
+        #         chi = np.sum(v_distribution * chi_t.T[sequence.argsort()], axis=1) * resolution
+        #     else:
+        #         chi = chi_real(w, P[i-1], grid=False) + 1j * chi_imag(w, P[i-1], grid=False)
+        #     T[i] = np.exp(abs_pref * np.sqrt(1. + chi * n).imag)
+        #     P[i] = T[i] * P[i-1]
+        # T = np.product(T, axis=0)
+        # return T
 
 
 if __name__ == '__main__':
