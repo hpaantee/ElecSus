@@ -25,7 +25,6 @@ from spectra import get_spectra
 import LindbladMasterEq as LME
 import BasisChanger as bc
 
-import cProfile
 
 
 groundState = LME.state(5, 0, 1/2)	 # 5S1/2
