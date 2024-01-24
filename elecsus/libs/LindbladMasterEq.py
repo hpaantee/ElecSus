@@ -21,7 +21,7 @@ init_printing(use_unicode=True) # allow LaTeX printing
 
 
 log = logging.getLogger('LME')
-log.setLevel(logging.INFO)
+log.setLevel(logging.DEBUG)
 
 class state:
     def __init__(self, n, l, j, f=None):
@@ -162,7 +162,9 @@ class atomicSystem:
         self.generateMatrices()
         # Add constrain that total population has to be 1
         self.system_matrix = self.master_equation.as_mutable()
-        # self.system_matrix = self.system_matrix.subs({'tau_t': self.transit_time})
+        if 'symbolic_transit' in self.p_dict:
+            log.warning('USING symbolic transit time')
+            self.system_matrix = self.system_matrix.subs({'tau_t': self.transit_time})
         self.system_matrix[0] = -1 + self.r.trace()
         log.debug('Generate linear system')
         self.A, self.b = self.generate_linear_system()
@@ -173,7 +175,8 @@ class atomicSystem:
         print(f'Updated transit time: {self.transit_time}')
         # self.generateMatrices()
         self.system_matrix = self.master_equation.as_mutable()
-        self.system_matrix = self.system_matrix.subs({'tau_t': self.transit_time})
+        if 'symbolic_transit' in self.p_dict:
+            self.system_matrix = self.system_matrix.subs({'tau_t': self.transit_time})
         self.system_matrix[0] = -1 + self.r.trace()
         self.A, self.b = self.generate_linear_system()
 
@@ -187,20 +190,19 @@ class atomicSystem:
         self.beam_diameter = p_dict['laserWaist']
         self.transit_time = self.getTransitTime()
 
-    def getTransitTime(self, mean_speed=None):
+    def getTransitTime(self, mean_speed_2d=None):
         # Ref: ARC-Alkali-Rydberg-Calculator Web interface (click 'View code')
         # in s
-        if mean_speed is None:
-            mean_speed = self.atom.getAverageSpeed(self.DoppT)
+        if mean_speed_2d is None:
+            # mean_speed = self.atom.getAverageSpeed(self.DoppT) # this is 3D!
+            mean_speed_2d = np.sqrt(np.pi * c.k * self.DoppT / 2 / self.atom.mass)
         # beam_fwhm = self.beam_diameter / 2 / 0.8493218
         # tau = np.sqrt(c.pi) * beam_fwhm / (2 * mean_speed
-        # print(f'transit-time: {tau}')
-        # print(f'transit broadening: {1 / tau / self.n[0] / 4}')
-        # print(1/tau)
         # Sagle
-        G = np.sqrt(8*c.k*self.DoppT/c.pi / self.atom.mass) / self.beam_diameter
-        tau = self.beam_diameter / np.abs(mean_speed)
-        # print(tau)
+        mean_path = np.pi / 4 * self.beam_diameter
+        # G = np.sqrt(8*c.k*self.DoppT/c.pi / self.atom.mass) / self.beam_diameter
+        # tau = self.beam_diameter / np.abs(mean_speed)
+        tau = mean_path / np.abs(mean_speed_2d)
         # print(1/G)
         # sys.exit()
         # return 1 / G
@@ -224,11 +226,9 @@ class atomicSystem:
             self.transit_time = self.p_dict['Gammat'] * 1e6
 
         self.slices = [slice(self.n[0:i].sum(), self.n[0:i+1].sum()) for i in range(self.n_states)]
-        DME = [np.sqrt((2*self.states[i].j+1) / (2*self.states[i+1].j+1)) * self.atom.getReducedMatrixElementJ_asymmetric(
-            *self.states[i]('nlj'), *self.states[i+1]('nlj'))
+        DME = np.sqrt((2*self.states[0].j+1) / (2*self.states[1].j+1)) \
+            * self.atom.getReducedMatrixElementJ_asymmetric(*self.states[0]('nlj'), *self.states[1]('nlj')) \
             * c.e * c.physical_constants['Bohr radius'][0]
-            for i in range(self.n_states-1)]
-        # print(DME)
         self.naturalLineWidth = [self.atom.getTransitionRate(
             *self.states[i+1]('nlj'), *self.states[i]('nlj')) / 2 / c.pi * 1e-6
             for i in range(self.n_states-1)]
@@ -237,7 +237,6 @@ class atomicSystem:
         #        for i in range(self.n_states-1)]
         # self.dipole_moments = [np.sqrt(SFF[i]/3) * DME[i]
         #                        for i in range(self.n_states-1)]
-        self.dme = [np.zeros((self.n[i], self.n[i+1])) for i in range(self.n_states-1)]
         H = ES.Hamiltonian(self.element, self.p_dict['Dline'], self.atom.gL, self.p_dict['Bfield'])
         Mg = np.array(H.groundManifold)[:,1:]  # Cut off energy eigenvalues
         Me = np.array(H.excitedManifold)[:,1:]
@@ -260,11 +259,11 @@ class atomicSystem:
         self.Gammas = dme_squared * self.naturalLineWidth[0]
 
         if self.p_dict['Pol'] == 0: # RCP
-            self.dme[0] = dme_r * DME[0]
+            self.dme = dme_r * DME
         elif self.p_dict['Pol'] == 50: #LP
-            self.dme[0] = 1 / np.sqrt(2) * (dme_r + dme_l) * DME[0]
+            self.dme = 1 / np.sqrt(2) * (dme_r + dme_l) * DME
         elif self.p_dict['Pol'] == 100: # LCP
-            self.dme[0] = dme_l * DME[0]
+            self.dme = dme_l * DME
 
     def generateSymbols(self):
         #######################################################################
@@ -276,14 +275,15 @@ class atomicSystem:
             f'\\rho_{{(0:{self.total_levels})/(0:{self.total_levels})}}')
         self.r = sy.Matrix(self.total_levels,
                            self.total_levels, self.r_individual)
+        if 'symbolic_transit' in self.p_dict:
+            self.tau_t = sy.symbols('tau_t')
 
     def generateMatrices(self):
         #######################################################################
         # Generate matrices
         #######################################################################
         self.H_rabi = sy.zeros(self.total_levels, self.total_levels)
-        for i in range(self.n_states-1):
-            self.H_rabi[self.slices[i], self.slices[i+1]] = 0.5e-6 / c.h * self.dme[i] * self.Efield
+        self.H_rabi[self.slices[0], self.slices[1]] = 0.5e-6 / c.h * self.dme * self.Efield
         self.H_rabi = self.H_rabi + self.H_rabi.transpose()
 
         detunings = np.concatenate([-self.energySeparation[0], self.wL - self.energySeparation[1]])
@@ -328,14 +328,15 @@ class atomicSystem:
         else:
             transit_factor = self.p_dict['transit_factor']
 
-        # tau_t = sy.symbols('tau_t')
 
         g_transit[self.slices[0], self.slices[0]] = 1 / self.transit_time / self.n[0] / transit_factor
         # "Decay" of excited states to ground states due to transit time
         g_transit[self.slices[1], self.slices[0]] = 1 / self.transit_time / self.n[0] / transit_factor
-        # g_transit[self.slices[0], self.slices[0]] = 1 / tau_t / self.n[0] / transit_factor * sy.ones(self.n[0], self.n[0])
-        # # "Decay" of excited states to ground states due to transit time
-        # g_transit[self.slices[1], self.slices[0]] = 1 / tau_t / self.n[0] / transit_factor * sy.ones(self.n[1], self.n[0])
+        if 'symbolic_transit' in self.p_dict:
+            g_transit = sy.zeros(self.total_levels, self.total_levels)
+            g_transit[self.slices[0], self.slices[0]] = 1 / self.tau_t / self.n[0] / transit_factor * sy.ones(self.n[0], self.n[0])
+            # "Decay" of excited states to ground states due to transit time
+            g_transit[self.slices[1], self.slices[0]] = 1 / self.tau_t / self.n[0] / transit_factor * sy.ones(self.n[1], self.n[0])
 
         if 'collisions' not in self.p_dict:
             log.warning('Implicitly assume decaying collisions')
@@ -436,7 +437,7 @@ class atomicSystem:
             # So we add a dimension so that (8,1) * (8,1) -> (8,1)
             if res.ndim == 1:
                 res = np.expand_dims(res, axis=1)
-            k_alt = [np.divide.outer(self.dme[i].ravel(), E_list[i]) / c.epsilon_0 for i in range(self.n_states-1)]
+            k_alt = [np.divide.outer(self.dme.ravel(), E_list[i]) / c.epsilon_0 for i in range(self.n_states-1)]
             # - Return sum of excited states. Indexing order is given by order
             #   of arguments of 'sy.linear_eq_to_matrix' above
             # - Population of excited states is given by diagonal entries
@@ -454,6 +455,7 @@ class atomicSystem:
             return self.solve_via_LUT(beams[0])
 
     def solve_w_doppler(self, beams, precision='high'):
+        log.debug('enter __solve_w_doppler__')
         beam_ge = beams[0]
         # chi_dopp(∆) = \int p(v,T)chi(∆-kv)dv = (p*chi)(∆)
         # k = 1 / lam2bda = w/c
@@ -538,6 +540,7 @@ class atomicSystem:
         return detunings, powers, beam_diameter, chi
 
     def transmission(self, beams, z=50e-3, doppler=True, precision='high'):
+        log.debug('__enter transmission__')
         alpha = self.optical_depth(beams, doppler, precision)
         return np.exp(alpha * z)
 
@@ -545,6 +548,7 @@ class atomicSystem:
         return 1 - self.transmission(beams, z, doppler, precision)
 
     def optical_depth(self, beams, doppler=True, precision='high'):
+        log.debug('__enter optical_depth__')
         n = self.atom.getNumberDensity(self.T)
         if doppler:
             _, chi = self.solve_w_doppler(beams, precision=precision)
