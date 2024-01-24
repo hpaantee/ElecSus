@@ -168,7 +168,6 @@ class atomicSystem:
         self.system_matrix[0] = -1 + self.r.trace()
         log.debug('Generate linear system')
         self.A, self.b = self.generate_linear_system()
-        # self.atom.conn.close()
 
     def update_transit(self, mean_speed):
         self.transit_time = self.getTransitTime(mean_speed) * 1e6
@@ -191,23 +190,12 @@ class atomicSystem:
         self.transit_time = self.getTransitTime()
 
     def getTransitTime(self, mean_speed_2d=None):
-        # Ref: ARC-Alkali-Rydberg-Calculator Web interface (click 'View code')
-        # in s
+        # Refs: ARC-Alkali-Rydberg-Calculator Web interface (click 'View code')
+        # but here we use the definitions from Sagle 1996
         if mean_speed_2d is None:
-            # mean_speed = self.atom.getAverageSpeed(self.DoppT) # this is 3D!
             mean_speed_2d = np.sqrt(np.pi * c.k * self.DoppT / 2 / self.atom.mass)
-        # beam_fwhm = self.beam_diameter / 2 / 0.8493218
-        # tau = np.sqrt(c.pi) * beam_fwhm / (2 * mean_speed
-        # Sagle
         mean_path = np.pi / 4 * self.beam_diameter
-        # G = np.sqrt(8*c.k*self.DoppT/c.pi / self.atom.mass) / self.beam_diameter
-        # tau = self.beam_diameter / np.abs(mean_speed)
         tau = mean_path / np.abs(mean_speed_2d)
-        # print(1/G)
-        # sys.exit()
-        # return 1 / G
-        # print(G)
-        # sys.exit()
         return tau
 
 
