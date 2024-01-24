@@ -909,7 +909,7 @@ def get_spectra(X, E_in, p_dict, outputs=None, _static=types.SimpleNamespace(ato
 			for mass_number, fraction in zip(mass_numbers, fractions):
 				if fraction > 0:
 					atom = bwf.atomicSystem(f'{Elem}{mass_number}', [groundState, excitedState], p_dict)
-					atom.atom.abundance = fraction / 100
+					atom.abundance = fraction / 100
 					_static.atoms.append(atom)
 		else:
 			for i in range(len(_static.atoms)):

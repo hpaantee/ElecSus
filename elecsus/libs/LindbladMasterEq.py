@@ -120,23 +120,23 @@ class atomicSystem:
             self.atom = arc.Sodium()
         elif element.lower() in ['k39', 'potassium39']:
             self.atom = arc.Potassium39()
-            self.atom.abundance = 1 - (p_dict['K40frac'] + p_dict['K41frac']) / 100
+            self.abundance = 1 - (p_dict['K40frac'] + p_dict['K41frac']) / 100
             self.isotopeShift = 15.87
         elif element.lower() in ['k40', 'potassium40']:
             self.atom = arc.Potassium40()
-            self.atom.abundance = p_dict['K40frac'] / 100
+            self.abundance = p_dict['K40frac'] / 100
             self.isotopeShift = -109.773
         elif element.lower() in ['k41', 'potassium41']:
             self.atom = arc.Potassium41()
-            self.atom.abundance = p_dict['K41frac'] / 100
+            self.abundance = p_dict['K41frac'] / 100
             self.isotopeShift = -219.625
         elif element.lower() in ['rb85', 'rubidium85']:
             self.atom = arc.Rubidium85()
-            self.atom.abundance = p_dict['rb85frac'] / 100
+            self.abundance = p_dict['rb85frac'] / 100
             self.isotopeShift = 21.734
         elif element.lower() in ['rb87', 'rubidium87']:
             self.atom = arc.Rubidium87()
-            self.atom.abundance = 1 - p_dict['rb85frac'] / 100
+            self.abundance = 1 - p_dict['rb85frac'] / 100
             self.isotopeShift = -56.361
         elif element.lower() in ['cs', 'cs133', 'caesium', 'caesium133']:
             self.atom = arc.Caesium()
