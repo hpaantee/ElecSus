@@ -46,7 +46,7 @@ import RotationMatrices as RM
 import BasisChanger as BC
 import JonesMatrices as JM
 import solve_dielectric as SD
-import beyond_weak_fields.atomic_system as bwf
+import LindbladMasterEq as bwf
 
 # direct testing
 import matplotlib.pyplot as plt
@@ -99,7 +99,7 @@ def FreqStren(groundLevels,excitedLevels,groundDim,
 	if Dline=='D1':
 		interatorList = list(range(groundDim))
 	elif Dline=='D2':
-		interatorList = list(range(groundDim,excitedDim))\
+		interatorList = list(range(groundDim,excitedDim))
 
 	# find difference in energies and do dot product between (all) ground states
 	# 	and selected parts of excited state matrix
@@ -108,7 +108,7 @@ def FreqStren(groundLevels,excitedLevels,groundDim,
 			cleb = dot(groundLevels[gg][1:],excitedLevels[ee][bottom:top]).real
 			cleb2 = cleb*cleb
 			if cleb2 > 0.0005: #If negligable don't calculate.
-				transitionFrequency[transNo] = int((-groundLevels[gg][0].real
+				transitionFrequency[transNo] = float((-groundLevels[gg][0].real
 											  +excitedLevels[ee][0].real))
 				# We choose to perform the ground manifold reduction (see
 				# equation (4) in manual) here for convenience.
@@ -903,18 +903,20 @@ def get_spectra(X, E_in, p_dict, outputs=None, _static=types.SimpleNamespace(ato
 		elif Dline == 'D2':
 			excitedState = bwf.state(principalQuantumNumber, 1, 3/2)  # P3/2
 
+		_static.atoms = []
 		if len(_static.atoms) == 0:
 			print('Generate atoms...')
 			for mass_number, fraction in zip(mass_numbers, fractions):
-				atom = bwf.atomicSystem(f'{Elem}{mass_number}', [groundState, excitedState], p_dict)
-				atom.atom.abundance = fraction / 100
-				_static.atoms.append(atom)
+				if fraction > 0:
+					atom = bwf.atomicSystem(f'{Elem}{mass_number}', [groundState, excitedState], p_dict)
+					atom.atom.abundance = fraction / 100
+					_static.atoms.append(atom)
 		else:
 			for i in range(len(_static.atoms)):
 				_static.atoms[i].update(p_dict)
-
-		beam_ge=bwf.beam(w=(X-shift)*1e6, P=laserPower, D=laserWaist)
-		transmissions = [atom.transmission([beam_ge], z=lcell, precision=p_dict['bwf_precision']) for atom in _static.atoms]
+		useDoppler = True if p_dict['DoppTemp'] > -273.14 else False
+		beam_ge=bwf.beam(w=(X-shift), P=laserPower, D=laserWaist)
+		transmissions = [atom.transmission([beam_ge], z=lcell, precision=p_dict['bwf_precision'], doppler=useDoppler) for atom in _static.atoms]
 		S0 = np.prod(np.array(transmissions), axis=0)
 
 	Iz = (E_out[2] * E_out[2].conjugate()).real / I_in
