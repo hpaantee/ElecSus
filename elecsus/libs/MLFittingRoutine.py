@@ -40,7 +40,10 @@ import lmfit as lm
 from spectra import get_spectra
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 import time
+=======
+>>>>>>> durham-qlm-main
 
 def fit_function(x,E_x,E_y,E_phase,T,lcell,Bfield=0,Btheta=0,Bphi=0,GammaBuf=0,shift=0,
 =======
@@ -160,7 +163,10 @@ def ML_fit(data,E_in,p_dict,p_dict_bools,data_type='S0',p_dict_bounds=None,metho
 <<<<<<< HEAD
 
 	return result.best_values, result
+<<<<<<< HEAD
 =======
 	
 	return result.best_values, result
 >>>>>>> 1933456b905739fb31c89665cdc6733e769e5ec0
+=======
+>>>>>>> durham-qlm-main
