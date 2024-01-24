@@ -11,6 +11,8 @@ import numpy as np
 import time
 import os
 import seaborn as sns
+import scipy as sp
+from scipy import constants as c
 results_folder = 'LME_plots'
 os.makedirs(results_folder, exist_ok=True)
 sns.set_palette(sns.color_palette('mako'))
@@ -22,6 +24,8 @@ sys.path.append('../libs')
 from spectra import get_spectra
 import LindbladMasterEq as LME
 import BasisChanger as bc
+
+import cProfile
 
 
 groundState = LME.state(5, 0, 1/2)	 # 5S1/2
@@ -421,7 +425,7 @@ def Rb87_D1_LCP_B_100G_high_T():
 def Rb87_D2_RCP_B_6000G_high_T():
 	from datetime import datetime
 	p_dict = {'Elem':'Rb','Dline':'D2', 'lcell':2e-3, 'T': 50., 'Pol': 0, 'Bfield': 6000, 'rb85frac': 0, 'GammaBuf': 0}#, 'DoppTemp': -273.14999}
-	p_dict_bwf = {**p_dict, 'laserPower': 1e-15, 'laserWaist': 2e-3, 'collisions': 'decay'}
+	p_dict_bwf = {**p_dict, 'laserPower': 1e-15, 'laserWaist': 2e-3, 'collisions': 'decay'}#, 'symbolic_transit': True}
 	x = np.linspace(4000, 20000, 2000)
 	[y_elecsus] = get_spectra(x, E_in=E_RCP, p_dict=p_dict, outputs=['S0'])
 	t = datetime.now()
@@ -446,6 +450,125 @@ def Rb87_D2_RCP_B_6000G_high_T():
 	# plt.ylabel('Residual')
 	plt.legend(frameon=False)
 	plt.savefig(f'{results_folder}/Rb87_D2_RCP_B_6000G_high_T.png', dpi=200)
+
+def Rb87_D2_RCP_B_6000G_high_T_custom_transit():
+	from datetime import datetime
+	p_dict = {'Elem':'Rb','Dline':'D2', 'lcell':2e-3, 'T': 50., 'Pol': 0, 'Bfield': 6000, 'rb85frac': 0, 'GammaBuf': 0}#, 'DoppTemp': -273.14999}
+	p_dict_bwf = {**p_dict, 'laserPower': 1e-15, 'laserWaist': 2e-3, 'collisions': 'decay', 'symbolic_transit': True}
+
+	def maxwell_boltzmann(v):
+		# https://en.wikipedia.org/wiki/Maxwell%E2%80%93Boltzmann_distribution
+		return 4 * np.pi * np.sqrt(Rb87_D2.atom.mass / (2 * c.pi * c.k * Rb87_D2.DoppT))**3 \
+		* np.exp(-Rb87_D2.atom.mass * v**2 / (2 * c.k * Rb87_D2.DoppT)) * v**2
+
+	def rayleigh(v):
+		# https://en.wikipedia.org/wiki/Rayleigh_distribution
+		return 2 * np.pi * Rb87_D2.atom.mass / (2 * c.pi * c.k * Rb87_D2.DoppT) \
+		* np.exp(-Rb87_D2.atom.mass * v**2 / (2 * c.k * Rb87_D2.DoppT)) * v
+
+	x = np.linspace(9500, 10900, 600)
+	t = datetime.now()
+	Rb87_D2 = LME.atomicSystem('Rb87', [groundState, excitedState_D2], p_dict=p_dict_bwf)
+	beam = LME.beam(w=x, P=1e-15, D=2e-3, profile='flat')
+	doppler = True
+
+	import scipy as sp
+	from scipy import constants as c
+	RbDen = Rb87_D2.atom.getNumberDensity(Rb87_D2.T)
+	k = Rb87_D2.f_resonance / c.c #/ 1e6
+
+	v = np.linspace(0, 1000, 100000)
+	v_dist_rayleigh = rayleigh(v)
+	v_dist_maxwell_boltzmann = maxwell_boltzmann(v)
+	v_avg_rayleigh = (v*v_dist_rayleigh).sum() / v_dist_rayleigh.sum()
+	v_avg_maxwell_boltzmann = (v*v_dist_maxwell_boltzmann).sum() / v_dist_maxwell_boltzmann.sum()
+	print(f'Average in 2D: {v_avg_rayleigh:.1f}')
+	print(f'Average in 3D: {v_avg_maxwell_boltzmann:.1f}')
+	plt.figure()
+	plt.plot(v, v_dist_rayleigh, c='C1', label='Rayleigh distribution')
+	plt.plot(v, v_dist_maxwell_boltzmann, '--', c='C4', label='MB distribution')
+	plt.legend()
+	plt.xlabel('Velocity [m/s]')
+	plt.ylabel('P(v)')
+	plt.savefig(f'{results_folder}/compare_velocity_distributions.png', dpi=200)
+
+	Rb87_D2.update_transit(v_avg_rayleigh)
+	y_avg_rayleigh = Rb87_D2.optical_depth([beam], doppler=doppler)
+	y_rayleigh = np.zeros_like(y_avg_rayleigh, dtype=np.complex128)
+
+	v = np.linspace(0, 900, 75)
+	dv = v[1] - v[0]
+	for i, vi in enumerate(v):
+		Rb87_D2.update_transit(vi)
+		if not doppler:
+			_, chi = Rb87_D2.solve([beam])
+		else:
+			_, chi = Rb87_D2.solve_w_doppler([beam])
+		y_rayleigh += chi * rayleigh(vi) * dv
+	y_rayleigh = 4 * np.pi * k * np.sqrt(1.0 + y_rayleigh * RbDen).imag
+	print(f'Total time of call: {datetime.now()-t}')
+
+	fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, tight_layout=True, gridspec_kw={'height_ratios': [3, 1]})
+	ax1.plot(x, y_avg_rayleigh, c='C1', label='Rayleigh, avg')
+	ax1.plot(x, y_rayleigh, '--', c='C4', label='Rayleigh, int')
+	ax2.plot(x, (y_avg_rayleigh - y_rayleigh)/y_avg_rayleigh*100, c='C1')
+	plt.xlabel('Detuning [MHz]')
+	ax1.set_ylabel('Optical depth')
+	ax2.set_ylabel('Residual [%]')
+	ax1.legend(frameon=False)
+	plt.savefig(f'{results_folder}/Compare_velocity_distributions_doppler_1e-15_power.png', dpi=200)
+
+def Rb87_D2_RCP_B_6000G_high_T_custom_transit_check_velocity_classes():
+	from datetime import datetime
+	p_dict = {'Elem':'Rb','Dline':'D2', 'lcell':2e-3, 'T': 50., 'Pol': 0, 'Bfield': 6000, 'rb85frac': 0, 'GammaBuf': 0}#, 'DoppTemp': -273.14999}
+	p_dict_bwf = {**p_dict, 'laserPower': 1e-15, 'laserWaist': 2e-3, 'collisions': 'decay', 'symbolic_transit': True}
+
+	def rayleigh(v):
+		# https://en.wikipedia.org/wiki/Rayleigh_distribution
+		return 2 * np.pi * Rb87_D2.atom.mass / (2 * c.pi * c.k * Rb87_D2.DoppT) \
+		* np.exp(-Rb87_D2.atom.mass * v**2 / (2 * c.k * Rb87_D2.DoppT)) * v
+
+	x = np.linspace(10206.6, 10207, 2)
+	t = datetime.now()
+	Rb87_D2 = LME.atomicSystem('Rb87', [groundState, excitedState_D2], p_dict=p_dict_bwf)
+	beam = LME.beam(w=x, P=1e-1, D=2e-3, profile='flat')
+	doppler = True
+
+	RbDen = Rb87_D2.atom.getNumberDensity(Rb87_D2.T)
+	k = Rb87_D2.f_resonance / c.c #/ 1e6
+
+	v = np.linspace(0, 1000, 100000)
+	v_dist_rayleigh = rayleigh(v) * (v[1] - v[0])
+	v_dist_rayleigh /= v_dist_rayleigh.sum()
+	v_avg_rayleigh = (v*v_dist_rayleigh).sum() / v_dist_rayleigh.sum()
+	print(f'Average in 2D: {v_avg_rayleigh:.1f}')
+
+	Rb87_D2.update_transit(v_avg_rayleigh)
+	y_avg_rayleigh = Rb87_D2.optical_depth([beam], doppler=doppler)
+
+	N = np.arange(3, 41, dtype=int)
+	y_rayleigh = np.zeros(N.size, dtype=np.complex128)
+
+	for ni, n in enumerate(N):
+		v = np.linspace(0, 900, n)
+		dv = v[1] - v[0]
+		tmp = 0
+		for i, vi in enumerate(v):
+			Rb87_D2.update_transit(vi)
+			if not doppler:
+				_, chi = Rb87_D2.solve([beam])
+			else:
+				_, chi = Rb87_D2.solve_w_doppler([beam])
+			tmp += chi[0] * rayleigh(vi) * dv
+		y_rayleigh[ni] = 4 * np.pi * k * np.sqrt(1.0 + tmp * RbDen).imag
+		print(f'Total time of call: {datetime.now()-t}')
+
+	plt.figure(tight_layout=True)
+	plt.axhline(y_avg_rayleigh[0], c='k')
+	plt.plot(N, y_rayleigh, c='C1', label='Rayleigh, int')
+	plt.xlabel('Number of velocity samples')
+	plt.ylabel('Line-centre optical depth')
+	plt.savefig(f'{results_folder}/Convergence_number_velocity_classes.png', dpi=200)
 
 def Rb87_D2_RCP_B_6000G_high_T_custom_doppler():
 	from datetime import datetime
@@ -508,8 +631,7 @@ def Rb87_D2_RCP_B_6000G_high_T_custom_doppler():
 	plt.ylabel('Transmission')
 	# plt.ylabel('Residual')
 	# plt.legend(frameon=False)
-	plt.savefig(f'{results_folder}/Rb87_D2_RCP_B_6000G_high_T.png', dpi=200)
-
+	plt.savefig(f'{results_folder}/Rb87_D2_RCP_B_6000G_high_T_custom_Doppler.png', dpi=200)
 
 def Rb87_D2_RCP_B_6000G_high_T_CG():
 	p_dict = {'Elem':'Rb','Dline':'D2', 'lcell':2e-3, 'T': 50., 'Pol': 0, 'Bfield': 6000, 'rb85frac': 0, 'GammaBuf': 0}
@@ -684,7 +806,7 @@ if __name__ == '__main__':
 	# Rb85_D1_RCP_B_100G()
 	# Rb85_D1_RCP_B_1000G()
 	# Rb85_D2_LCP_B_0G()
-	Rb85_D2_LCP_B_100G()
+	# Rb85_D2_LCP_B_100G()
 	# Rb85_D2_RCP_B_100G()
 
 	# Rb87_D1_LCP_B_0G()
@@ -696,14 +818,16 @@ if __name__ == '__main__':
 	# Rb87_D1_RCP_B_1000G()
 	# Rb87_D1_RCP_B_6000G()
 	# Rb87_D1_LP_B_0G()
-	Rb87_D1_LP_B_100G()
+	# Rb87_D1_LP_B_100G()
 	# Rb87_D2_LCP_B_0G()
 	# Rb87_D2_LCP_B_100G()
 	# Rb87_D1_LCP_B_100G_power_scan()
 	# Rb87_D1_LCP_B_100G_high_T()
 
-	Rb87_D2_RCP_B_6000G_high_T()
+	# Rb87_D2_RCP_B_6000G_high_T()
 	# Rb87_D2_RCP_B_6000G_high_T_custom_doppler()
+	# Rb87_D2_RCP_B_6000G_high_T_custom_transit()
+	Rb87_D2_RCP_B_6000G_high_T_custom_transit_check_velocity_classes()
 
 	# Rb87_D2_RCP_B_6000G_high_T_CG()
 	# Rb87_D2_RCP_B_6000G_high_T_sweep_Gamma_t()
