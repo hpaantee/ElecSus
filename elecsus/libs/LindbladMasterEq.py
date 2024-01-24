@@ -48,7 +48,11 @@ class state:
 class beam:
     def __init__(self, **kwargs):
         self.w = kwargs['w']
-        self.profile = kwargs['profile']
+        if 'profile' in kwargs:
+            self.profile = kwargs['profile']
+        else:
+            log.warning('Use Gaussian intensity profile')
+            self.profile = 'gaussian'
         if 'sgn' in kwargs:
             self.sgn = kwargs['sgn']
         else:
@@ -64,15 +68,15 @@ class beam:
         if 'E' in kwargs:
             self.setE(kwargs['E'])
         else:
-            self.setP(kwargs['P'], kwargs['profile'])
+            self.setP(kwargs['P'])
 
-    def setP(self, P, profile):
+    def setP(self, P):
         self.P = P
         # I = 1/2 * c * epsilon_0 * E0**2
-        log.info(f'Beam profile used: {profile}')
-        if profile == 'flat':
+        log.info(f'Beam profile used: {self.profile}')
+        if self.profile == 'flat':
             I = P / self.A
-        elif profile == 'gaussian':
+        elif self.profile == 'gaussian':
             I = 2 * P / self.A
         else:
             raise KeyError('no beam profile specified')
@@ -138,7 +142,6 @@ class atomicSystem:
             self.atom = arc.Caesium()
         else:
             raise ValueError
-
 
         self.states = copy.deepcopy(states)
         self.max_allowed_states = 3
