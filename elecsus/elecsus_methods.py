@@ -46,13 +46,6 @@ from libs import SAFittingRoutine as SA
 from libs import RRFittingRoutine as RR
 from libs import BWFFittingRoutine as BWF
 
-# if os.name == 'posix':
-# 	from time import time as timing #Timing for linux or apple
-# else:
-# 	from time import clock as timing #Timing for windows
-
-# import time
-
 # Stop warnings about casting complex numbers
 warnings.simplefilter("ignore")
 
