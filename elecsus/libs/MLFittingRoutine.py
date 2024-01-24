@@ -39,9 +39,13 @@ import lmfit as lm
 
 from spectra import get_spectra
 
+<<<<<<< HEAD
 import time
 
 def fit_function(x,E_x,E_y,E_phase,T,lcell,Bfield=0,Btheta=0,Bphi=0,GammaBuf=0,shift=0,
+=======
+def fit_function(x,E_x,E_y,E_phase,T,lcell,Bfield,Btheta,Bphi,GammaBuf,shift,
+>>>>>>> 1933456b905739fb31c89665cdc6733e769e5ec0
 							DoppTemp=20,rb85frac=72.17,K40frac=0.01,K41frac=6.73,
 							Elem='Rb',Dline='D2',Constrain=True,bwf_precision='high',
 							laserPower=0,laserWaist=5e-3,output='S0', verbose=False):
@@ -153,5 +157,10 @@ def ML_fit(data,E_in,p_dict,p_dict_bools,data_type='S0',p_dict_bounds=None,metho
 	if verbose: print(params)
 
 	result = model.fit(y, x=x, params=params, method=method, **kwargz)
+<<<<<<< HEAD
 
 	return result.best_values, result
+=======
+	
+	return result.best_values, result
+>>>>>>> 1933456b905739fb31c89665cdc6733e769e5ec0
