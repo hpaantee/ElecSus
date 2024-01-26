@@ -134,14 +134,17 @@ class atomicSystem:
             self.atom = arc.Rubidium85()
             self.abundance = p_dict['rb85frac'] / 100
             self.isotopeShift = 21.734
+            self.meltingPoint = self.atom.meltingPoint
         elif element.lower() in ['rb87', 'rubidium87']:
             self.atom = arc.Rubidium87()
             self.abundance = 1 - p_dict['rb85frac'] / 100
             self.isotopeShift = -56.361
+            self.meltingPoint = self.atom.meltingPoint
         elif element.lower() in ['cs', 'cs133', 'caesium', 'caesium133']:
             self.atom = arc.Caesium()
         else:
             raise ValueError
+        self.mass = self.atom.mass
 
         self.states = copy.deepcopy(states)
         self.max_allowed_states = 3
@@ -171,6 +174,22 @@ class atomicSystem:
         self.system_matrix[0] = -1 + self.r.trace()
         log.debug('Generate linear system')
         self.A, self.b = self.generate_linear_system()
+        # In the last step of initializing we delete the atom object because
+        # it contains some annoying sqlite connections disrupting multithreading
+        self.atom.conn.close()
+        self.atom = None
+
+    def getPressure(self, temperature):
+        if temperature < self.meltingPoint:
+            return 10.0 ** (2.881 + 4.857 - 4215.0 / temperature) * 133.322368
+        elif temperature < 550.0 + 273.15:
+            return (10.0 ** (2.881 + 8.316 - 4275.0 / temperature - 1.3102 * log(temperature) / log(10.0)) * 133.322368)
+        else:
+            print('ERROR: Rb vapour pressure above 550 C is unknown')
+            return 0
+
+    def getNumberDensity(self, temperature):
+        return self.getPressure(temperature) / (c.k * temperature)
 
     def update_transit(self, mean_speed):
         self.transit_time = self.getTransitTime(mean_speed) * 1e6
@@ -196,7 +215,7 @@ class atomicSystem:
         # Refs: ARC-Alkali-Rydberg-Calculator Web interface (click 'View code')
         # but here we use the definitions from Sagle 1996
         if mean_speed_2d is None:
-            mean_speed_2d = np.sqrt(np.pi * c.k * self.DoppT / 2 / self.atom.mass)
+            mean_speed_2d = np.sqrt(np.pi * c.k * self.DoppT / 2 / self.mass)
         mean_path = np.pi / 4 * self.beam_diameter
         tau = mean_path / np.abs(mean_speed_2d)
         return tau
@@ -377,15 +396,16 @@ class atomicSystem:
         return A, b
 
     def v_dist(self, v):
-        return np.sqrt(self.atom.mass / (2 * c.pi * c.k * self.DoppT)) \
-            * np.exp(-self.atom.mass * v**2 / (2 * c.k * self.DoppT))
+        return np.sqrt(self.mass / (2 * c.pi * c.k * self.DoppT)) \
+            * np.exp(-self.mass * v**2 / (2 * c.k * self.DoppT))
+
 
     def cdf(self, v):
-        o = np.sqrt(c.k * self.DoppT / self.atom.mass) * np.sqrt(2)
+        o = np.sqrt(c.k * self.DoppT / self.mass) * np.sqrt(2)
         return 0.5 * (1 + sp.special.erf(v/o))
 
     def cdfinv(self, p):
-        o = np.sqrt(c.k * self.DoppT / self.atom.mass) * np.sqrt(2)
+        o = np.sqrt(c.k * self.DoppT / self.mass) * np.sqrt(2)
         return o * sp.special.erfinv(2 * p - 1)
 
     def matrix2list(self, mat):
@@ -435,9 +455,9 @@ class atomicSystem:
             # - Complex-valued susceptibility is given by off-axis entries
             #   (only one side, they are complex conjugated anyway)
             state_population = np.array([np.sum(res[self.slices[i]], axis=0).real for i in range(self.n_states)])
-            chi = np.array([self.atom.abundance * 2 * np.sum(res[self.transition_list[i]] * k_alt[i], axis=0)
+            chi = np.array([self.abundance * 2 * np.sum(res[self.transition_list[i]] * k_alt[i], axis=0)
                 for i in range(self.n_states-1)])
-            # chi = np.array([self.atom.abundance * (
+            # chi = np.array([self.abundance * (
             #     np.sum(res[self.transition_list[i]] * k_alt[i], axis=0)
             #     -np.sum(res[self.transition_list2[i]] * k_alt[i], axis=0))
             #     for i in range(self.n_states-1)])
@@ -540,7 +560,7 @@ class atomicSystem:
 
     def optical_depth(self, beams, doppler=True, precision='high'):
         log.debug('__enter optical_depth__')
-        n = self.atom.getNumberDensity(self.T)
+        n = self.getNumberDensity(self.T)
         if doppler:
             _, chi = self.solve_w_doppler(beams, precision=precision)
         else:
