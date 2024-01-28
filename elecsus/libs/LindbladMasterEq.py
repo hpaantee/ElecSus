@@ -183,7 +183,7 @@ class atomicSystem:
         if temperature < self.meltingPoint:
             return 10.0 ** (2.881 + 4.857 - 4215.0 / temperature) * 133.322368
         elif temperature < 550.0 + 273.15:
-            return (10.0 ** (2.881 + 8.316 - 4275.0 / temperature - 1.3102 * log(temperature) / log(10.0)) * 133.322368)
+            return (10.0 ** (2.881 + 8.316 - 4275.0 / temperature - 1.3102 * np.log(temperature) / np.log(10.0)) * 133.322368)
         else:
             print('ERROR: Rb vapour pressure above 550 C is unknown')
             return 0
@@ -399,6 +399,10 @@ class atomicSystem:
         return np.sqrt(self.mass / (2 * c.pi * c.k * self.DoppT)) \
             * np.exp(-self.mass * v**2 / (2 * c.k * self.DoppT))
 
+    def rayleigh(self, v):
+        # https://en.wikipedia.org/wiki/Rayleigh_distribution
+        return 2 * c.pi * self.mass / (2 * c.pi * c.k * self.DoppT) \
+        * np.exp(-self.mass * v**2 / (2 * c.k * self.DoppT)) * v
 
     def cdf(self, v):
         o = np.sqrt(c.k * self.DoppT / self.mass) * np.sqrt(2)
@@ -550,25 +554,46 @@ class atomicSystem:
             np.savez_compressed(LUT_file, detunings=detunings, powers=powers, beam_diameter=beam_diameter, chi=chi)
         return detunings, powers, beam_diameter, chi
 
-    def transmission(self, beams, z=50e-3, doppler=True, precision='high'):
+    def transmission(self, beams, z=50e-3, doppler=True, precision='high', transit_type='single'):
         log.debug('__enter transmission__')
         alpha = self.optical_depth(beams, doppler, precision)
         return np.exp(alpha * z)
 
-    def absorption(self, beams, z=50e-3, doppler=True, precision='high'):
+    def absorption(self, beams, z=50e-3, doppler=True, precision='high', transit_type='single'):
         return 1 - self.transmission(beams, z, doppler, precision)
 
-    def optical_depth(self, beams, doppler=True, precision='high'):
+    def optical_depth(self, beams, doppler=True, precision='high', transit_type='single'):
         log.debug('__enter optical_depth__')
         n = self.getNumberDensity(self.T)
-        if doppler:
-            _, chi = self.solve_w_doppler(beams, precision=precision)
-        else:
-            _, chi = self.solve(beams, precision=precision)
+
+        if (transit_type == 'integral') and ('symbolic_transit' not in self.p_dict):
+            log.warning('Integrating without symbolic transit time not supported.')
+            log.warning('Change your p_dict to include "symbolic_transit: True"')
+            log.warning('Falling back to average operation...')
+            transit_type = 'single'
+
+        if transit_type == 'single':
+            if doppler:
+                _, chi = self.solve_w_doppler(beams, precision=precision)
+            else:
+                _, chi = self.solve(beams, precision=precision)
+        elif transit_type == 'integral':
+            v = np.linspace(0, 900, 20)
+            dv = v[1] - v[0]
+            # chi = np.zeros((beams[0].w.size, v.size), dtype=np.complex128)
+            chi = 0
+            for i, vi in enumerate(v):
+                self.update_transit(vi)
+                if doppler:
+                    _, tmp_chi = self.solve_w_doppler(beams, precision=precision)
+                else:
+                    _, tmp_chi = self.solve(beams, precision=precision)
+                chi += tmp_chi * self.rayleigh(vi) * dv
+
         n_imag = np.sqrt(1.0 + chi * n).imag
         return 4 * c.pi * self.f_resonance / c.c * n_imag
 
-    def propagated_transmission(self, beams, z=50e-3, doppler=True, steps=50):
+    def propagated_transmission(self, beams, z=50e-3, doppler=True, steps=50, transit_type='single'):
         w, P0, D, _ = beams[0]
         dz = z / steps
         P = np.zeros((steps+1, len(w)))

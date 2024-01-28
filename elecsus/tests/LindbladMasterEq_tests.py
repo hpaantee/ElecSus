@@ -457,23 +457,23 @@ def Rb87_D2_RCP_B_6000G_high_T_custom_transit():
 
 	def maxwell_boltzmann(v):
 		# https://en.wikipedia.org/wiki/Maxwell%E2%80%93Boltzmann_distribution
-		return 4 * np.pi * np.sqrt(Rb87_D2.atom.mass / (2 * c.pi * c.k * Rb87_D2.DoppT))**3 \
-		* np.exp(-Rb87_D2.atom.mass * v**2 / (2 * c.k * Rb87_D2.DoppT)) * v**2
+		return 4 * np.pi * np.sqrt(Rb87_D2.mass / (2 * c.pi * c.k * Rb87_D2.DoppT))**3 \
+		* np.exp(-Rb87_D2.mass * v**2 / (2 * c.k * Rb87_D2.DoppT)) * v**2
 
 	def rayleigh(v):
 		# https://en.wikipedia.org/wiki/Rayleigh_distribution
-		return 2 * np.pi * Rb87_D2.atom.mass / (2 * c.pi * c.k * Rb87_D2.DoppT) \
-		* np.exp(-Rb87_D2.atom.mass * v**2 / (2 * c.k * Rb87_D2.DoppT)) * v
+		return 2 * np.pi * Rb87_D2.mass / (2 * c.pi * c.k * Rb87_D2.DoppT) \
+		* np.exp(-Rb87_D2.mass * v**2 / (2 * c.k * Rb87_D2.DoppT)) * v
 
 	x = np.linspace(9500, 10900, 600)
 	t = datetime.now()
 	Rb87_D2 = LME.atomicSystem('Rb87', [groundState, excitedState_D2], p_dict=p_dict_bwf)
-	beam = LME.beam(w=x, P=1e-15, D=2e-3, profile='flat')
+	beam = LME.beam(w=x, P=1e-3, D=2e-3, profile='flat')
 	doppler = True
 
 	import scipy as sp
 	from scipy import constants as c
-	RbDen = Rb87_D2.atom.getNumberDensity(Rb87_D2.T)
+	RbDen = Rb87_D2.getNumberDensity(Rb87_D2.T)
 	k = Rb87_D2.f_resonance / c.c #/ 1e6
 
 	v = np.linspace(0, 1000, 100000)
@@ -493,18 +493,7 @@ def Rb87_D2_RCP_B_6000G_high_T_custom_transit():
 
 	Rb87_D2.update_transit(v_avg_rayleigh)
 	y_avg_rayleigh = Rb87_D2.optical_depth([beam], doppler=doppler)
-	y_rayleigh = np.zeros_like(y_avg_rayleigh, dtype=np.complex128)
-
-	v = np.linspace(0, 900, 75)
-	dv = v[1] - v[0]
-	for i, vi in enumerate(v):
-		Rb87_D2.update_transit(vi)
-		if not doppler:
-			_, chi = Rb87_D2.solve([beam])
-		else:
-			_, chi = Rb87_D2.solve_w_doppler([beam])
-		y_rayleigh += chi * rayleigh(vi) * dv
-	y_rayleigh = 4 * np.pi * k * np.sqrt(1.0 + y_rayleigh * RbDen).imag
+	y_rayleigh = Rb87_D2.optical_depth([beam], doppler=doppler, transit_type='integral')
 	print(f'Total time of call: {datetime.now()-t}')
 
 	fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, tight_layout=True, gridspec_kw={'height_ratios': [3, 1]})
@@ -515,7 +504,7 @@ def Rb87_D2_RCP_B_6000G_high_T_custom_transit():
 	ax1.set_ylabel('Optical depth')
 	ax2.set_ylabel('Residual [%]')
 	ax1.legend(frameon=False)
-	plt.savefig(f'{results_folder}/Compare_velocity_distributions_doppler_1e-15_power.png', dpi=200)
+	# plt.savefig(f'{results_folder}/Compare_velocity_distributions_doppler_1e-15_power.png', dpi=200)
 
 def Rb87_D2_RCP_B_6000G_high_T_custom_transit_check_velocity_classes():
 	from datetime import datetime
@@ -825,8 +814,8 @@ if __name__ == '__main__':
 
 	# Rb87_D2_RCP_B_6000G_high_T()
 	# Rb87_D2_RCP_B_6000G_high_T_custom_doppler()
-	# Rb87_D2_RCP_B_6000G_high_T_custom_transit()
-	Rb87_D2_RCP_B_6000G_high_T_custom_transit_check_velocity_classes()
+	Rb87_D2_RCP_B_6000G_high_T_custom_transit()
+	# Rb87_D2_RCP_B_6000G_high_T_custom_transit_check_velocity_classes()
 
 	# Rb87_D2_RCP_B_6000G_high_T_CG()
 	# Rb87_D2_RCP_B_6000G_high_T_sweep_Gamma_t()
