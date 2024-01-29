@@ -107,7 +107,7 @@ p_dict_defaults = {	'lcell':75e-3,'Bfield':0., 'T':20.,
 
 class atomicSystem:
     # def __init__(self, element, states, T=20+273.15, beam_diameter=5e-3):
-    def __init__(self, element, states, p_dict={}):
+    def __init__(self, element, states, p_dict={}, multiprocessed=False):
         # Insert all default values we did not explicitly specify
         p_dict = {**p_dict_defaults, **p_dict}
         self.isotopeShift = 0
@@ -173,11 +173,18 @@ class atomicSystem:
             self.system_matrix = self.system_matrix.subs({'tau_t': self.transit_time})
         self.system_matrix[0] = -1 + self.r.trace()
         log.debug('Generate linear system')
-        self.A, self.b = self.generate_linear_system()
         # In the last step of initializing we delete the atom object because
         # it contains some annoying sqlite connections disrupting multithreading
         self.atom.conn.close()
         self.atom = None
+        # If we want to pickle this class, we have to perform the last step after
+        # we send it, otherwise the generated cpython code breaks this. Instead we have to
+        # perform it manually afterwards
+        if not multiprocessed:
+            self.A, self.b = self.generate_linear_system()
+
+    def finish_multiprocessed_initialization(self):
+        self.A, self.b = self.generate_linear_system()
 
     def getPressure(self, temperature):
         if temperature < self.meltingPoint:
@@ -219,7 +226,6 @@ class atomicSystem:
         mean_path = np.pi / 4 * self.beam_diameter
         tau = mean_path / np.abs(mean_speed_2d)
         return tau
-
 
     def initSystemProperties(self):
         self.f_resonance = self.atom.getTransitionFrequency(
